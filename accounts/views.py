@@ -194,7 +194,7 @@ def login_view(request):
             try:
                 role = map_role_from_ldap_attrs(user_entry, user_details)
                 request.session['role'] = role
-                logger.info("Assigned role '%s' to user %s and stored in session.", role, username)
+                print("Assigned role ", role, "to user :",username,"and stored in session.")
             except Exception:
                 logger.exception("Failed to map role for user %s; defaulting to EMPLOYEE", username)
                 request.session['role'] = "EMPLOYEE"
