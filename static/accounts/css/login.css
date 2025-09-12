@@ -1,0 +1,65 @@
+/* static/accounts/css/login.css */
+:root{
+  --bg:#f3f5f9;
+  --card:#ffffff;
+  --accent:#0b5cff;
+  --muted:#6b7280;
+  --danger:#ef4444;
+  --success:#10b981;
+  --shadow: 0 6px 24px rgba(13,20,40,0.08);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background:linear-gradient(180deg,var(--bg),#ffffff);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:32px;
+}
+
+.login-root{width:100%;max-width:980px;display:flex;align-items:center;justify-content:center}
+.login-card{
+  width:100%;
+  max-width:420px;
+  background:var(--card);
+  border-radius:12px;
+  box-shadow:var(--shadow);
+  padding:28px;
+}
+.brand{display:flex;flex-direction:column;align-items:center;text-align:center;margin-bottom:18px}
+.brand-logo{width:68px;height:68px;object-fit:contain;border-radius:8px}
+.brand h1{margin:8px 0 0;font-size:22px;letter-spacing:0.6px}
+.tag{color:var(--muted);font-size:13px;margin-top:4px}
+
+.input-row{margin-bottom:14px}
+.input-row label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+.input-row input{
+  width:100%;
+  padding:12px 12px;
+  border-radius:8px;
+  border:1px solid #e6e9ef;
+  font-size:15px;
+  outline:none;
+}
+.input-row input:focus{box-shadow:0 0 0 4px rgba(11,92,255,0.08);border-color:var(--accent)}
+
+.pw-wrap{display:flex;align-items:center;gap:8px}
+.pw-wrap button{
+  background:transparent;border:none;color:var(--accent);cursor:pointer;font-weight:600;padding:6px 8px;border-radius:6px;
+}
+
+.actions{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
+.btn{padding:10px 16px;border-radius:8px;border:1px solid transparent;cursor:pointer;font-weight:600}
+.btn.primary{background:var(--accent);color:white}
+.alert{padding:10px;border-radius:8px;margin-bottom:12px;font-size:14px}
+.alert.error{background:#ffe7e7;color:var(--danger);border:1px solid rgba(239,68,68,0.08)}
+.alert.success{background:#e6fffa;color:var(--success);border:1px solid rgba(16,185,129,0.08)}
+
+.foot{margin-top:14px;text-align:center;color:var(--muted);font-size:13px}
+@media (max-width:520px){
+  .login-card{padding:18px;margin:8px}
+}

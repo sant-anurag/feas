@@ -1,0 +1,59 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>FEAS — Login</title>
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="{% static 'accounts/css/login.css' %}">
+</head>
+<body>
+  <main class="login-root">
+    <section class="login-card">
+      <div class="brand">
+        <!-- optional: provide feas_logo.png in static/accounts/images or remove <img> -->
+        <img src="{% static 'accounts/images/feas_logo.png' %}" alt="FEAS" class="brand-logo" onerror="this.style.display='none'"/>
+        <h1>FEAS</h1>
+        <p class="tag">Forvia Effort Allocation System</p>
+      </div>
+
+      {% if messages %}
+        {% for msg in messages %}
+          <div class="alert {% if msg.tags %}{{ msg.tags }}{% endif %}">
+            {{ msg }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <form id="loginForm" method="post" class="login-form" autocomplete="off">
+        {% csrf_token %}
+        <div class="input-row">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" required autofocus placeholder="e.g. john.doe"/>
+        </div>
+
+        <div class="input-row">
+          <label for="password">Password</label>
+          <div class="pw-wrap">
+            <input id="password" name="password" type="password" required placeholder="Your password"/>
+            <button id="togglePw" type="button" aria-label="toggle password">Show</button>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn primary" type="submit">Sign in</button>
+        </div>
+
+        <div class="foot">
+          <small>Contact IT if you can't sign in.</small>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <!-- JS -->
+  <script src="{% static 'accounts/js/login.js' %}"></script>
+</body>
+</html>
