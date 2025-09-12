@@ -1,0 +1,63 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FEAS – Forvia Effort Allocation System</title>
+    <link rel="stylesheet" href="{% static 'base/css/base.css' %}">
+    <script src="{% static 'base/js/base.js' %}" defer></script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="logo">
+            <img src="{% static 'base/images/feas_logo.png' %}" alt="FEAS">
+            <h1>FEAS</h1>
+        </div>
+        <div class="user-info">
+            <span class="user-name">{{ request.session.cn|default:request.session.username }}</span>
+            <span class="user-role">{{ request.session.title|default:"Employee" }}</span>
+            <div class="dropdown">
+                <button class="dropdown-btn">☰</button>
+                <div class="dropdown-content">
+                    <a href="#">Profile</a>
+                    <a href="{% url 'accounts:logout' %}">Logout</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Layout -->
+    <div class="layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+    <nav>
+        <ul>
+            {% for item in feas_menu %}
+                <li>
+                    <a href="{{ item.url|default:'#' }}" class="menu-item">{{ item.title }}</a>
+                    {% if item.submenus %}
+                        <ul class="submenu">
+                            {% for s in item.submenus %}
+                                <li><a href="{{ s.url|default:'#' }}">{{ s.title }}</a></li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    </nav>
+</aside>
+
+
+        <!-- Main Content -->
+        <main class="content">
+            {% block content %}
+            <h2>Welcome to FEAS Dashboard</h2>
+            <p>This is your corporate resource allocation system.</p>
+            {% endblock %}
+        </main>
+    </div>
+</body>
+</html>

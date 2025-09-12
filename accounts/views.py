@@ -109,7 +109,7 @@ def login_view(request):
     """
     Login page: authenticates via LDAP (bind). On success:
       - reuses the bound connection to fetch user_entry and reportees
-      - stores basic user info in session
+      - stores basic user info and role in session
       - triggers DB initializer in background thread
       - redirects to dashboard or root
     """
@@ -133,6 +133,7 @@ def login_view(request):
             request.session['username'] = username
             request.session['cn'] = 'Administrator'
             request.session['title'] = 'Administrator'
+            request.session['role'] = "ADMIN"
             messages.success(request, "Logged in as super admin.")
             # spawn DB init thread
             threading.Thread(target=initialize_database, daemon=True).start()
@@ -145,7 +146,7 @@ def login_view(request):
             return render(request, "accounts/login.html")
 
         if is_auth and conn:
-            # success: set session values
+            # success: set basic session values
             request.session['is_authenticated'] = True
             request.session['username'] = username
             request.session['cn'] = str(getattr(user_entry, 'cn', username)) if user_entry else username
@@ -153,20 +154,29 @@ def login_view(request):
             request.session['last_login'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             messages.success(request, "Login successful.")
 
-            # Reuse same bound connection to fetch reportees
+            # Reuse same bound connection to fetch reportees and determine DN
+            user_dn = None
+            user_details = {}
             try:
-                # Determine the DN
                 if user_entry:
                     user_dn = user_entry.entry_dn
+                    # try to populate a lightweight user_details dict from attributes if present
+                    try:
+                        user_details['department'] = getattr(user_entry, 'department', None).value if hasattr(user_entry, 'department') and getattr(user_entry, 'department', None) else ""
+                        user_details['title'] = getattr(user_entry, 'title', None).value if hasattr(user_entry, 'title') and getattr(user_entry, 'title', None) else ""
+                    except Exception:
+                        # safe guard if ldap3 entry attr access differs
+                        user_details['department'] = ""
+                        user_details['title'] = ""
                 else:
                     # fallback: try to resolve via helper using the user-bound conn
                     resolved = get_user_entry_by_username(username, conn=conn, username_password_for_conn=None)
-                    user_dn = resolved.entry_dn if resolved else None
-
+                    if resolved:
+                        user_dn = resolved.entry_dn
+                        user_entry = resolved
+                # If we found DN, fetch reportees (reusing conn)
                 if user_dn:
-                    # get reportees using the SAME connection (avoid an additional bind)
                     reportees = get_reportees_for_user_dn(user_dn, conn=conn)
-                    # Print/log the result for your quick verification
                     logger.info("Reportees for %s: %s", username, reportees)
                     print(f"[DEBUG] Reportees for {username}: {reportees}")
                 else:
@@ -174,11 +184,21 @@ def login_view(request):
             except Exception:
                 logger.exception("Error while fetching reportees for user %s", username)
             finally:
-                # Close the user-bound connection (we created it during check_credentials_bind)
+                # Close the user-bound connection (created during check_credentials_bind)
                 try:
                     conn.unbind()
                 except Exception:
                     pass
+
+            # --- NEW: determine role and store in session ---
+            try:
+                role = map_role_from_ldap_attrs(user_entry, user_details)
+                request.session['role'] = role
+                logger.info("Assigned role '%s' to user %s and stored in session.", role, username)
+            except Exception:
+                logger.exception("Failed to map role for user %s; defaulting to EMPLOYEE", username)
+                request.session['role'] = "EMPLOYEE"
+            # --- END NEW ---
 
             # Trigger DB initializer in a background thread (idempotent)
             threading.Thread(target=initialize_database, daemon=True).start()
@@ -199,3 +219,43 @@ def login_view(request):
 def logout_view(request):
     request.session.flush()
     return redirect('accounts:login')
+
+# accounts/views.py (add or paste near the imports)
+def map_role_from_ldap_attrs(user_entry, user_details):
+    """
+    Return canonical role string based on LDAP entry attributes or user_details.
+    Strategy:
+      - If user_entry has memberOf (groups), try to match common role keywords.
+      - Else fallback to department/title heuristics in user_details.
+    """
+    # prioritize memberOf groups
+    member_of = None
+    if user_entry is not None and hasattr(user_entry, 'memberOf') and user_entry.memberOf:
+        try:
+            # ldap3 multi-valued attr may be in .memberOf.values or iterable
+            member_of = list(user_entry.memberOf.values) if hasattr(user_entry.memberOf, 'values') else list(user_entry.memberOf)
+        except Exception:
+            member_of = None
+
+    if member_of:
+        # Normalize strings and detect keywords
+        for grp in member_of:
+            g = str(grp).lower()
+            if "admin" in g or "admins" in g:
+                return "ADMIN"
+            if "pdl" in g or "program" in g or "tpl" in g or "project" in g:
+                return "PDL"
+            if "coe" in g or "centerofexcellence" in g or "coe_leader" in g:
+                return "COE_LEADER"
+            if "team" in g and "lead" in g:
+                return "TEAM_LEAD"
+
+    # fallback heuristic using department/title
+    dept = user_details.get("department", "") if user_details else ""
+    title = user_details.get("title", "") if user_details else ""
+    if dept and "engineering" in dept.lower() and "lead" in str(title).lower():
+        return "TEAM_LEAD"
+    if "manager" in str(title).lower() or "lead" in str(title).lower():
+        return "TEAM_LEAD"
+    # default
+    return "EMPLOYEE"
