@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load static %}
+
+
+{% block content %}
+<!-- include page-specific stylesheet -->
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+
+<div class="panel" style="padding:20px 22px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div>
+      <h2 style="margin:0">Projects</h2>
+      <div class="muted" style="color:var(--muted);font-size:13px">List of projects — edit or delete when required</div>
+    </div>
+    <div>
+      <a href="{% url 'projects:create' %}" class="btn primary" style="text-decoration:none">＋ New Project</a>
+    </div>
+  </div>
+
+  <div style="overflow:auto">
+    <table class="project-table" aria-describedby="projectsTable">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th style="width:160px">PDL</th>
+          <th style="width:120px">Start</th>
+          <th style="width:120px">End</th>
+          <th>Description</th>
+          <th style="width:150px;text-align:right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in projects %}
+        <tr>
+          <td>{{ p.name }}</td>
+          <td>{{ p.pdl_name|default:"-" }}</td>
+          <td>{{ p.start_date|default:"-" }}</td>
+          <td>{{ p.end_date|default:"-" }}</td>
+          <td>{{ p.description|default:"-" }}</td>
+          <td style="text-align:right">
+            <div class="action-buttons" role="group" aria-label="Project actions for {{ p.name }}">
+              <a href="{% url 'projects:edit' p.id %}" class="action-btn edit project-action project-action--edit">✎ Edit</a>
+
+              <form method="post" action="{% url 'projects:delete' p.id %}" style="display:inline" onsubmit="return confirmDelete(event, '{{ p.name|escapejs }}')">
+                {% csrf_token %}
+                <button type="submit" class="action-btn delete project-action project-action--delete">🗑 Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" style="padding:18px;text-align:center">No projects found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  function confirmDelete(e, name) {
+    if (!confirm("Delete project \"" + name + "\"? This action cannot be undone.")) {
+      e.preventDefault();
+      return false;
+    }
+    return true;
+  }
+</script>
+{% endblock %}

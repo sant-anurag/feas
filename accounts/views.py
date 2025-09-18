@@ -149,6 +149,8 @@ def login_view(request):
             # success: set basic session values
             request.session['is_authenticated'] = True
             request.session['username'] = username
+            request.session['ldap_username'] = username
+            request.session['ldap_password'] = password
             request.session['cn'] = str(getattr(user_entry, 'cn', username)) if user_entry else username
             request.session['title'] = str(getattr(user_entry, 'title', '')) if user_entry else ''
             request.session['last_login'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

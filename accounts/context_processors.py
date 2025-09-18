@@ -20,13 +20,14 @@ MENU_TREE = [
     {
         "key": "projects",
         "title": "Projects",
-        "url": reverse_lazy("projects:list") if False else "#",  # replace when you add route
+        "url": "#",
         "roles": ["ADMIN", "PDL", "COE_LEADER", "TEAM_LEAD"],
         "submenus": [
-            {"key": "projects_list", "title": "Projects List", "url": reverse_lazy("projects:list") if False else "#", "roles": ["ADMIN","PDL"]},
-            {"key": "create_project", "title": "Create Project", "url": "#", "roles": ["ADMIN","PDL"]},
+            {"key": "projects_list", "title": "Projects List", "url": reverse_lazy("projects:list"),"roles": ["ADMIN", "PDL"]},
+            {"key": "create_project", "title": "Create Project", "url": reverse_lazy("projects:create"),"roles": ["ADMIN", "PDL"]},
         ],
     },
+
     {
         "key": "resources",
         "title": "Resource Management",

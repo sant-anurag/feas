@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% load static %}
+
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+
+<div class="panel" style="max-width:900px;padding:20px 22px">
+  <h2 style="margin:0 0 12px 0">Edit Project</h2>
+  {% if error %}
+    <div role="alert" style="color:#b91c1c;margin-bottom:12px;font-weight:700">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" class="form-grid" style="margin-top:8px">
+    {% csrf_token %}
+    <label>
+      Project Name
+      <input type="text" name="name" required value="{{ project.name }}" class="form-input" />
+    </label>
+
+    <label>
+      Description
+      <textarea name="description" rows="4" class="form-input">{{ project.description }}</textarea>
+    </label>
+
+    <div style="display:flex;gap:14px;">
+      <label style="flex:1">
+        Start Date
+        <input type="date" name="start_date" value="{{ project.start_date }}" class="form-input"/>
+      </label>
+      <label style="flex:1">
+        End Date
+        <input type="date" name="end_date" value="{{ project.end_date }}" class="form-input"/>
+      </label>
+    </div>
+
+    <label>
+      Program Development Lead (PDL)
+      <select name="pdl_user_id" class="form-input">
+        <option value="">-- None --</option>
+        {% for u in users %}
+        <option value="{{ u.id }}" {% if project.pdl_user_id == u.id %}selected{% endif %}>{{ u.username }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <div class="form-actions">
+      <a href="{% url 'projects:list' %}" class="btn secondary" style="text-decoration:none">Cancel</a>
+      <button type="submit" class="btn primary">Save Changes</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

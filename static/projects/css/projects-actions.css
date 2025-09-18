@@ -1,0 +1,198 @@
+/* projects-actions.css
+   Styles for the action-panel, card-buttons, modals and autocomplete UI.
+   Place this file at: static/projects/css/projects-actions.css
+*/
+
+/* ---------- base action panel ---------- */
+.actions-panel {
+  background: #fff;
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 8px 30px rgba(2,6,23,0.06);
+  border: 1px solid rgba(10,30,80,0.04);
+}
+.actions-panel h3 {
+  margin: 0 0 12px 0;
+  color: #0b1320;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+/* ---------- cards ---------- */
+.action-card {
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg,#ffffff,#fbfdff);
+  border: 1px solid rgba(10,30,80,0.04);
+}
+.card-title {
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #0b1320;
+}
+
+/* card body default layout */
+.card-body {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ---------- Action Card Buttons (square-ish with icon + label) ---------- */
+.card-body--grid {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* primary card button */
+.action-card-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  min-width: 140px;
+  border-radius: 10px;
+  text-decoration: none;
+  background: linear-gradient(180deg, #2563eb, #1e40af);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 10px 30px rgba(31,111,224,0.12);
+  border: 1px solid rgba(255,255,255,0.06);
+  transition: transform 160ms ease, box-shadow 200ms ease, background 180ms ease;
+  cursor: pointer;
+}
+
+/* ghost (secondary) variant */
+.action-card-btn--ghost {
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,250,250,0.96));
+  color: #0b1320;
+  border: 1px solid rgba(10,30,80,0.06);
+  box-shadow: 0 6px 18px rgba(2,6,23,0.06);
+}
+
+/* icon slot */
+.acb-icon {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  box-shadow: 0 8px 18px rgba(2,6,23,0.12);
+  flex-shrink: 0;
+}
+
+/* label */
+.acb-label {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* hover effects */
+.action-card-btn:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 44px rgba(31,111,224,0.14);
+}
+.action-card-btn--ghost:hover {
+  transform: translateY(-2px);
+  background: linear-gradient(180deg,#ffffff,#f2f6ff);
+  box-shadow: 0 12px 30px rgba(2,6,23,0.08);
+}
+
+/* ---------- modal styles ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  display: none; /* toggled by JS */
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  background: rgba(6,12,30,0.45);
+  padding: 18px;
+}
+.modal-card {
+  width: 520px;
+  max-width: 96%;
+  background: #fff;
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 18px 60px rgba(2,6,23,0.18);
+  border: 1px solid rgba(10,30,80,0.04);
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(10,30,80,0.04);
+  font-weight: 800;
+}
+.modal-header button.close-modal {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 16px;
+}
+.modal-body {
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+}
+.modal-footer {
+  padding: 12px 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid rgba(10,30,80,0.04);
+}
+
+/* ---------- autocomplete list ---------- */
+.autocomplete-list {
+  position: relative;
+  display: none;
+  background: #fff;
+  border: 1px solid rgba(10,30,80,0.08);
+  border-radius: 8px;
+  margin-top: 6px;
+  box-shadow: 0 8px 20px rgba(2,6,23,0.06);
+  max-height: 220px;
+  overflow: auto;
+  z-index: 2200;
+}
+.autocomplete-item {
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(10,30,80,0.02);
+}
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item .a-title { font-weight: 700; color: #0b1320; }
+.autocomplete-item .a-sub { font-size: 12px; color: #6b7280; margin-top: 4px; display:flex; gap:8px; align-items:center; }
+.autocomplete-item.active, .autocomplete-item:hover {
+  background: linear-gradient(90deg, rgba(37,99,235,0.06), rgba(37,99,235,0.03));
+}
+
+/* ---------- small responsive tweaks ---------- */
+@media (max-width: 980px) {
+  .card-body--grid { justify-content: flex-start; }
+  .action-card-btn { min-width: 120px; padding: 8px 12px; }
+  .acb-icon { width: 32px; height: 32px; }
+  .modal-card { width: 92%; }
+}
+
+/* ---------- tiny utility for placing inputs inside modals/panels ---------- */
+.form-input {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(10,30,80,0.08);
+  background: #fff;
+  color: #0b1320;
+  font-size: 14px;
+  width: 100%;
+  box-sizing: border-box;
+}

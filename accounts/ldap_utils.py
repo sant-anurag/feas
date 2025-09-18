@@ -22,21 +22,22 @@ def _get_ldap_connection(username: str = None, password: str = None):
     server_uri = getattr(settings, "LDAP_SERVER", None)
     if not server_uri:
         raise RuntimeError("LDAP_SERVER not configured in settings.")
-
+    print(f"Connecting to LDAP server at {server_uri}")
     server_port = int(getattr(settings, "LDAP_PORT", 389))
     server = Server(server_uri, port=server_port, get_info=ALL)
 
     # Bind as user
     if username and password is not None:
         bind_user, _ = build_bind_username(username)
-        conn = Connection(server, user=bind_user, password=password, receive_timeout=10, auto_bind=True)
+        conn = Connection(server, user=bind_user, password=password, receive_timeout=20, auto_bind=True)
         return conn
 
     # Fallback: service account
     bind_dn = getattr(settings, "LDAP_BIND_DN", None)
     bind_pw = getattr(settings, "LDAP_BIND_PASSWORD", None)
+    print(f"Binding as service account: {bind_dn}")
     if bind_dn and bind_pw:
-        conn = Connection(server, user=bind_dn, password=bind_pw, receive_timeout=10, auto_bind=True)
+        conn = Connection(server, user=bind_dn, password=bind_pw, receive_timeout=20, auto_bind=True)
         return conn
 
     raise RuntimeError("No LDAP credentials provided.")

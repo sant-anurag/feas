@@ -2,126 +2,238 @@
 <!doctype html>
 <html lang="en">
 <head>
+  {% block extra_css %}{% endblock %}
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>FEAS — Forvia Effort Allocation System</title>
 
-  <!-- Google font -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-
-  <!-- Base CSS (make sure file exists at static/base/css/base.css) -->
   <link rel="stylesheet" href="{% static 'base/css/base.css' %}">
-
-  <!-- Page-specific CSS (optional) -->
-  {% block extra_css %}{% endblock %}
 </head>
 <body>
-  <!-- Header -->
-  <header class="app-header">
-    <div style="display:flex;align-items:center;gap:12px">
-      <!-- Mobile toggle (shown on small screens) -->
-      <button class="mobile-toggle-btn mobile-hamb" aria-label="menu">☰</button>
+<header class="app-header" role="banner" aria-label="Application header">
+  <div class="header-left">
+    <button id="mobileMenuBtn" class="mobile-toggle-btn" aria-label="Open menu" onclick="toggleMobileSidebar()">☰</button>
 
-      <!-- Logo -->
-      <div class="logo">
-        <img src="{% static 'base/images/feas_logo.png' %}" alt="FEAS" onerror="this.style.display='none'"/>
-        <h1>FEAS</h1>
+    <div class="logo" aria-hidden="false">
+      <img src="{% static 'base/images/feas_logo.png' %}" alt="FEAS logo" onerror="this.style.display='none'"/>
+      <div class="logo-text">
+        <h1>Program Resource Allocation</h1>
+        <small class="logo-sub">Forvia Effort Allocation System</small>
       </div>
     </div>
-
-    <!-- Header right: user profile -->
-    <div class="user-info">
-      <div class="user-meta">
-        <div class="user-name">
-          {{ request.session.cn|default:request.session.username|default:"Unknown User" }}
-        </div>
-        <div class="user-role">
-          {{ request.session.role|default:"Employee" }}
-        </div>
-      </div>
-
-      <div class="profile-pill" title="Profile menu">
-        <div class="profile-avatar">
-          {% if request.session.cn %}
-            {{ request.session.cn|slice:":1"|upper }}
-          {% else %}
-            U
-          {% endif %}
-        </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-start">
-          <small style="font-weight:600">{{ request.session.cn|default:request.session.username|default:"User" }}</small>
-          <small style="font-size:11px;color:#6b7280">{{ request.session.title|default:"" }}</small>
-        </div>
-
-        <!-- dropdown -->
-        <div style="margin-left:12px">
-          <div class="dropdown">
-            <button class="dropdown-btn" aria-haspopup="true" aria-expanded="false">≡</button>
-            <div class="dropdown-content" role="menu">
-              <a href="#" role="menuitem">Profile</a>
-              <a href="{% url 'accounts:logout' %}" role="menuitem">Logout</a>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <!-- Layout (sidebar + main content) -->
-  <div class="layout">
-    <!-- Sidebar -->
-    <aside class="sidebar" id="feasSidebar">
-      <!-- Sidebar header with collapse button -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;margin-bottom:6px">
-        <div style="font-weight:700;color:#0b5cff">Navigation</div>
-        <button class="sidebar-toggle-btn" title="Collapse sidebar">◀</button>
-      </div>
-
-      <nav aria-label="Main navigation">
-        <ul class="side-nav">
-          {% comment %} Render dynamic menu (feas_menu provided by context processor) {% endcomment %}
-          {% for item in feas_menu %}
-            <li class="side-item">
-              {% if item.submenus %}
-                {# parent with submenu - clicking toggles submenu via data attribute #}
-                <a href="{{ item.url|default:'#' }}" class="side-link" data-toggle-target="#sub-{{ forloop.counter }}">
-                  <span class="icon">{{ item.title|slice:":1"|upper }}</span>
-                  <span class="side-label">{{ item.title }}</span>
-                </a>
-                <ul id="sub-{{ forloop.counter }}" class="submenu">
-                  {% for s in item.submenus %}
-                    <li><a href="{{ s.url|default:'#' }}">{{ s.title }}</a></li>
-                  {% endfor %}
-                </ul>
-              {% else %}
-                <a href="{{ item.url|default:'#' }}" class="side-link">
-                  <span class="icon">{{ item.title|slice:":1"|upper }}</span>
-                  <span class="side-label">{{ item.title }}</span>
-                </a>
-              {% endif %}
-            </li>
-          {% empty %}
-            <li class="side-item"><a class="side-link" href="#">No menu items</a></li>
-          {% endfor %}
-        </ul>
-      </nav>
-    </aside>
-
-    <!-- Main content -->
-    <main class="content" role="main">
-      <div class="panel">
-        {% block content %}
-        <h2>Welcome to FEAS Dashboard</h2>
-        <p>This is your corporate resource allocation system. Use the left menu to navigate.</p>
-        {% endblock %}
-      </div>
-    </main>
   </div>
 
-  <!-- Base JS (make sure file exists at static/base/js/base.js) -->
-  <script src="{% static 'base/js/base.js' %}" defer></script>
+  <div class="company-center" aria-hidden="true">
+    <span class="company-badge">FORVIA</span>
+  </div>
 
-  <!-- Page-specific JS (optional) -->
-  {% block extra_js %}{% endblock %}
+  <div class="user-info" role="navigation" aria-label="User menu">
+    <div class="profile-pill" id="profilePill" tabindex="0" aria-haspopup="true" aria-expanded="false">
+      <div class="profile-avatar" aria-hidden="true">
+        {% if request.session.cn %}
+          {{ request.session.cn|slice:":1"|upper }}
+        {% else %}
+          U
+        {% endif %}
+      </div>
+
+      <div class="profile-meta">
+        <small class="profile-name">{{ request.session.cn|default:request.session.username|default:"User" }}</small>
+        <small class="profile-title">{{ request.session.title|default:"" }}</small>
+      </div>
+
+      <button id="profileMenuBtn" class="dropdown-btn" aria-expanded="false" aria-controls="profileMenu">▾</button>
+
+      <div id="profileMenu" class="profile-dropdown" role="menu" aria-hidden="true">
+        <a href="#" role="menuitem" class="profile-link">Profile</a>
+        <a href="{% url 'accounts:logout' %}" role="menuitem" class="profile-link">Logout</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeMobileSidebar()" aria-hidden="true"></div>
+
+  <aside class="sidebar" id="feasSidebar" role="navigation" aria-label="Main navigation">
+    <div class="sidebar-header">
+      <div>
+        <span class="sidebar-title">Navigation</span>
+        <button class="sidebar-pin" title="Pin/Unpin sidebar" aria-pressed="false" onclick="toggleSidebar()">⤢</button>
+      </div>
+    </div>
+
+    <nav aria-label="Primary">
+      <ul class="side-nav">
+        {% for item in feas_menu %}
+          <li class="side-item" data-has-sub="{{ item.submenus|yesno:'1,0' }}">
+            {% if item.submenus %}
+              <!-- main link (click toggles inline submenu) -->
+              <a href="{{ item.url|default:'#' }}" class="side-link" aria-expanded="false"
+                 onclick="toggleSubmenu(event, 'sub-{{ forloop.counter }}')" title="{{ item.title }}">
+                <span class="active-accent" aria-hidden="true"></span>
+                <span class="icon" aria-hidden="true">{{ item.title|slice:":1"|upper }}</span>
+                <span class="side-label">{{ item.title }}</span>
+                <span class="chev" aria-hidden="true">&#9662;</span>
+              </a>
+
+              <!-- inline accordion submenu -->
+              <ul id="sub-{{ forloop.counter }}" class="submenu" aria-hidden="true" data-parent="{{ forloop.counter }}">
+                {% for s in item.submenus %}
+                  <li class="sub-item"><a href="{{ s.url|default:'#' }}">{{ s.title }}</a></li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <a href="{{ item.url|default:'#' }}" class="side-link" title="{{ item.title }}">
+                <span class="active-accent" aria-hidden="true"></span>
+                <span class="icon" aria-hidden="true">{{ item.title|slice:":1"|upper }}</span>
+                <span class="side-label">{{ item.title }}</span>
+              </a>
+            {% endif %}
+          </li>
+        {% empty %}
+          <li class="side-item"><a class="side-link" href="#">No menu items</a></li>
+        {% endfor %}
+      </ul>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="sidebar-quick">
+        <button class="pill-btn" title="New Allocation">＋ New</button>
+        <button class="pill-btn ghost" title="Import Data">⤓ Import</button>
+      </div>
+      <small class="sidebar-copy">© FEAS</small>
+    </div>
+  </aside>
+
+  <main class="content" role="main" aria-live="polite">
+    <div class="panel">
+      {% block content %}
+      <h2>Welcome to FEAS Dashboard</h2>
+      <p>This is your corporate resource allocation system. Use the left menu to navigate.</p>
+      {% endblock %}
+    </div>
+  </main>
+</div>
+
+<!-- inline helpers preserved (toggle names preserved) -->
+<script>
+  function toggleSidebar() {
+    const sidebar = document.getElementById('feasSidebar');
+    const content = document.querySelector('.content');
+    sidebar.classList.toggle('collapsed');
+    const collapsed = sidebar.classList.contains('collapsed');
+    document.querySelector('.sidebar-pin').setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+    if (collapsed) content.style.marginLeft = '72px';
+    else content.style.marginLeft = '260px';
+  }
+
+  // toggleSubmenu now toggles the inline submenu (accordion style)
+  function toggleSubmenu(e, id) {
+    e.preventDefault();
+    const submenu = document.getElementById(id);
+    if (!submenu) return;
+
+    // if sidebar is collapsed, keep existing behaviour: just toggle (no inline open)
+    const sb = document.getElementById('feasSidebar');
+    if (sb && sb.classList.contains('collapsed')) {
+      submenu.classList.toggle('open');
+      const parentLink = submenu.previousElementSibling;
+      if (parentLink) {
+        const expanded = submenu.classList.contains('open');
+        parentLink.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        submenu.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+      }
+      return;
+    }
+
+    // close other open submenus (accordion behavior)
+    document.querySelectorAll('.submenu.open').forEach(function(s){
+      if (s.id !== id) {
+        s.classList.remove('open');
+        s.setAttribute('aria-hidden','true');
+        const link = s.previousElementSibling;
+        if (link) link.setAttribute('aria-expanded','false');
+      }
+    });
+
+    // toggle this submenu
+    submenu.classList.toggle('open');
+    const parentLink = submenu.previousElementSibling;
+    if (parentLink) {
+      const expanded = submenu.classList.contains('open');
+      parentLink.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      submenu.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+    }
+  }
+
+  function toggleMobileSidebar() {
+    const sidebar = document.getElementById('feasSidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('active');
+    overlay.setAttribute('aria-hidden', sidebar.classList.contains('open') ? 'false' : 'true');
+  }
+
+  function closeMobileSidebar() {
+    const sidebar = document.getElementById('feasSidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.remove('open');
+    overlay.classList.remove('active');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+
+  // profile dropdown (click opens, click outside closes, ESC closes)
+  (function(){
+    const pill = document.getElementById('profilePill');
+    const btn = document.getElementById('profileMenuBtn');
+    const menu = document.getElementById('profileMenu');
+
+    function closeMenu() {
+      if (!menu) return;
+      menu.style.display = 'none';
+      menu.setAttribute('aria-hidden', 'true');
+      btn.setAttribute('aria-expanded','false');
+      pill.setAttribute('aria-expanded','false');
+    }
+    function openMenu() {
+      if (!menu) return;
+      menu.style.display = 'block';
+      menu.setAttribute('aria-hidden','false');
+      btn.setAttribute('aria-expanded','true');
+      pill.setAttribute('aria-expanded','true');
+    }
+
+    if (btn && menu && pill) {
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        if (menu.style.display === 'block') closeMenu();
+        else openMenu();
+      });
+
+      // accessibility: toggle with Enter/Space on pill
+      pill.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (menu.style.display === 'block') closeMenu(); else openMenu();
+        }
+      });
+
+      // click outside closes
+      document.addEventListener('click', function(ev){
+        if (!pill.contains(ev.target)) closeMenu();
+      });
+
+      // ESC closes
+      document.addEventListener('keyup', function(ev){
+        if (ev.key === 'Escape') closeMenu();
+      });
+    }
+  })();
+</script>
+
+<script src="{% static 'base/js/base.js' %}" defer></script>
+{% block extra_js %}{% endblock %}
 </body>
 </html>
