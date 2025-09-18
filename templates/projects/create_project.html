@@ -76,7 +76,7 @@
   </div>
 </div>
 
-<!-- ===== MODALS: keep markup minimal but functional; JS already wires [data-open] and [data-close] ===== -->
+<!-- ===== MODALS: keep markup minimal but functional; selects are populated from context 'coes' and 'domains' ===== -->
 
 <!-- COE Create Modal -->
 <div id="coeCreateModal" class="modal" aria-hidden="true">
@@ -93,6 +93,12 @@
       <label>
         <div class="label-title">Description</div>
         <textarea class="form-input" id="coe_desc_input" rows="3" placeholder="Short description"></textarea>
+      </label>
+      <label>
+        <div class="label-title">COE Leader (optional)</div>
+        <input id="coe_leader_picker" class="form-input" placeholder="Search user..." autocomplete="off">
+        <input id="coe_leader_username" type="hidden">
+        <div id="coe_leader_suggestions" class="autocomplete-list" aria-hidden="true"></div>
       </label>
     </div>
     <div class="modal-footer">
@@ -114,7 +120,11 @@
         <div class="label-title">Select COE</div>
         <select class="form-input" id="coe_select">
           <option value="">-- Select COE --</option>
-          <!-- Fill options server side or by AJAX -->
+          {% if coes %}
+            {% for coe in coes %}
+              <option value="{{ coe.id }}">{{ coe.name }}</option>
+            {% endfor %}
+          {% endif %}
         </select>
       </label>
       <label>
@@ -147,6 +157,11 @@
         <div class="label-title">Select COE</div>
         <select class="form-input" id="coe_for_leader">
           <option value="">-- Select COE --</option>
+          {% if coes %}
+            {% for coe in coes %}
+              <option value="{{ coe.id }}">{{ coe.name }}</option>
+            {% endfor %}
+          {% endif %}
         </select>
       </label>
     </div>
@@ -168,6 +183,17 @@
       <label>
         <div class="label-title">Domain Name</div>
         <input type="text" class="form-input" id="domain_name_input" placeholder="Domain Name">
+      </label>
+      <label>
+        <div class="label-title">COE</div>
+        <select class="form-input" id="domain_coe_select">
+          <option value="">-- Select COE --</option>
+          {% if coes %}
+            {% for coe in coes %}
+              <option value="{{ coe.id }}">{{ coe.name }}</option>
+            {% endfor %}
+          {% endif %}
+        </select>
       </label>
       <label>
         <div class="label-title">Domain Lead (optional)</div>
@@ -195,6 +221,11 @@
         <div class="label-title">Select Domain</div>
         <select class="form-input" id="domain_select">
           <option value="">-- Select Domain --</option>
+          {% if domains %}
+            {% for d in domains %}
+              <option value="{{ d.id }}" data-coe="{{ d.coe_id|default:'' }}">{{ d.name }}</option>
+            {% endfor %}
+          {% endif %}
         </select>
       </label>
       <label>
@@ -230,22 +261,5 @@
 
 {% block extra_js %}
 <script src="{% static 'projects/js/projects-actions.js' %}"></script>
-
-<!-- Optional: small inline helper wiring for modal buttons if you want them to use AJAX later.
-     This does not change current functionality. -->
-<script>
-  // keep handlers minimal to avoid interfering with existing JS
-  document.addEventListener('DOMContentLoaded', function() {
-    // Example: wire COE Create Save to close modal (no backend call here)
-    const coeSave = document.getElementById('coeCreateSave');
-    if (coeSave) coeSave.addEventListener('click', function(){ document.querySelector('[data-close="coeCreateModal"]').click(); });
-
-    const projectDeleteConfirm = document.getElementById('projectDeleteConfirm');
-    if (projectDeleteConfirm) projectDeleteConfirm.addEventListener('click', function(){
-      // default behavior: just close modal — developer can attach AJAX call later
-      document.querySelector('[data-close="projectDeleteModal"]').click();
-    });
-  });
-</script>
 {% endblock %}
 {% endblock %}
