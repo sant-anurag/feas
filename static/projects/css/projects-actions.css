@@ -1,6 +1,6 @@
 /* projects-actions.css
-   Styles for the action-panel, card-buttons, modals and autocomplete UI.
-   Place this file at: static/projects/css/projects-actions.css
+   Upgraded modal + action-panel styling (visual only).
+   Keep existing JS wiring that uses .modal, .modal-card, .modal-header, .modal-body, .modal-footer, .close-modal
 */
 
 /* ---------- base action panel ---------- */
@@ -104,7 +104,9 @@
   box-shadow: 0 12px 30px rgba(2,6,23,0.08);
 }
 
-/* ---------- modal styles ---------- */
+/* ---------- modal styles (upgraded) ---------- */
+
+/* Backdrop: slightly darker and add subtle blur for depth */
 .modal {
   position: fixed;
   inset: 0;
@@ -112,47 +114,107 @@
   align-items: center;
   justify-content: center;
   z-index: 2000;
-  background: rgba(6,12,30,0.45);
-  padding: 18px;
+  background: rgba(6,12,30,0.55);
+  padding: 24px;
+  backdrop-filter: blur(4px);
 }
+
+/* Modal card: frosted glass look with subtle border + shadow */
 .modal-card {
-  width: 520px;
+  width: 560px;
   max-width: 96%;
-  background: #fff;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,252,255,0.98));
   border-radius: 12px;
   padding: 0;
   overflow: hidden;
-  box-shadow: 0 18px 60px rgba(2,6,23,0.18);
-  border: 1px solid rgba(10,30,80,0.04);
+  box-shadow: 0 28px 80px rgba(11,24,50,0.28);
+  border: 1px solid rgba(255,255,255,0.12);
+  position: relative;
+  transform: translateY(0);
+  transition: transform 220ms cubic-bezier(.2,.9,.3,1), opacity 220ms ease;
 }
+
+/* Header: gradient band and stronger typography */
 .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 16px;
+  padding: 16px 18px;
+  background: linear-gradient(90deg, rgba(37,99,235,0.10), rgba(37,99,235,0.04));
   border-bottom: 1px solid rgba(10,30,80,0.04);
-  font-weight: 800;
 }
-.modal-header button.close-modal {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
+.modal-header span {
   font-size: 16px;
-}
-.modal-body {
-  padding: 14px 16px;
-  display: grid;
-  gap: 10px;
-}
-.modal-footer {
-  padding: 12px 16px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  border-top: 1px solid rgba(10,30,80,0.04);
+  font-weight: 800;
+  color: #091233;
+  letter-spacing: 0.2px;
 }
 
-/* ---------- autocomplete list ---------- */
+/* Close button: circular with subtle hover */
+.modal-header button.close-modal {
+  background: rgba(11,19,35,0.04);
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  color: #0b1320;
+  transition: background 140ms ease, transform 140ms ease;
+}
+.modal-header button.close-modal:hover {
+  background: rgba(11,19,35,0.08);
+  transform: rotate(90deg);
+}
+
+/* Modal body: comfortable spacing and form-grid inside */
+.modal-body {
+  padding: 18px 18px;
+  display: grid;
+  gap: 12px;
+  background: transparent;
+}
+
+/* footer with separated action area */
+.modal-footer {
+  padding: 14px 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid rgba(10,30,80,0.03);
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,249,255,0.98));
+}
+
+/* button variants in modal */
+.modal-footer .btn {
+  min-width: 98px;
+  padding: 10px 14px;
+  border-radius: 10px;
+}
+
+.modal-footer .btn.primary {
+  background: linear-gradient(90deg, #2563eb, #1e40af);
+  color: #fff;
+  box-shadow: 0 8px 28px rgba(37,99,235,0.18);
+}
+
+.modal-footer .btn.secondary {
+  background: #fff;
+  border: 1px solid rgba(10,30,80,0.08);
+  color: #0b1320;
+}
+
+.modal-footer .btn.danger {
+  background: linear-gradient(180deg,#ffefef,#ffdede);
+  color: #b91c1c;
+  border: 1px solid rgba(185,28,28,0.06);
+  box-shadow: 0 8px 20px rgba(185,28,28,0.06);
+}
+
+/* ---------- autocomplete list (kept but slightly adjusted) ---------- */
 .autocomplete-list {
   position: relative;
   display: none;
@@ -182,7 +244,10 @@
   .card-body--grid { justify-content: flex-start; }
   .action-card-btn { min-width: 120px; padding: 8px 12px; }
   .acb-icon { width: 32px; height: 32px; }
-  .modal-card { width: 92%; }
+  .modal-card { width: 96%; padding: 0; }
+  .modal-body { padding: 14px; }
+  .modal-header { padding: 12px 14px; }
+  .modal-footer { padding: 12px 14px; gap:8px; }
 }
 
 /* ---------- tiny utility for placing inputs inside modals/panels ---------- */
@@ -195,4 +260,42 @@
   font-size: 14px;
   width: 100%;
   box-sizing: border-box;
+}
+/* === Flat row-wise light buttons for actions panel === */
+.action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.btn-light {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #f8fbff, #f0f6ff);
+  border: 1px solid #dce7ff;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e3a8a;
+  text-decoration: none;
+  transition: all 0.25s ease;
+}
+
+.btn-light:hover {
+  background: linear-gradient(90deg, #f0f6ff, #e3eeff);
+  box-shadow: 0 4px 12px rgba(37,99,235,0.12);
+  transform: translateY(-1px);
+}
+
+.btn-light.danger {
+  border: 1px solid #fdd;
+  background: linear-gradient(90deg, #fff5f5, #ffecec);
+  color: #b91c1c;
+}
+
+.btn-light.danger:hover {
+  background: linear-gradient(90deg, #ffecec, #ffdada);
+  box-shadow: 0 4px 12px rgba(185,28,28,0.2);
 }

@@ -1,13 +1,25 @@
 /* ========= PROJECTS MODULE STYLES ========= */
+/* This file contains the project module base styles including the create form.
+   Updated to visually match the upgraded modal styles above. */
 
-/* Shared panels */
+/* Panel (card) base */
+.panel {
+  background: #fff;
+  border-radius: 14px;
+  padding: 26px;
+  box-shadow: 0 8px 24px rgba(2,6,23,0.06);
+  border: 1px solid rgba(10,30,80,0.04);
+}
+
+/* Header */
 .panel h2 {
-  margin-bottom: 18px;
+  margin: 0 0 18px 0;
   font-size: 22px;
   font-weight: 700;
   color: var(--accent);
 }
 
+/* Muted helper text */
 .panel .muted {
   font-size: 14px;
   color: var(--text-muted);
@@ -43,7 +55,7 @@
   transition: background 0.25s;
 }
 
-/* action buttons */
+/* action buttons on list */
 .action-buttons {
   display: flex;
   justify-content: flex-end;
@@ -87,29 +99,47 @@
 /* ===== Forms (Create/Edit Project) ===== */
 .form-grid {
   display: grid;
-  gap: 18px;
-  max-width: 700px;
+  gap: 20px;
+  max-width: 720px;
 }
 
+/* label block */
 .form-grid label {
   font-weight: 600;
   font-size: 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   color: var(--text-dark);
 }
 
+/* small helper label title inside label */
+.label-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #0b1320;
+}
+
+/* Inputs / textarea / select base */
 .form-input,
 .form-grid textarea,
 .form-grid select {
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid rgba(10, 30, 80, 0.12);
-  border-radius: 8px;
-  font-size: 14px;
-  background: #fff;
+  border-radius: 10px;
+  font-size: 15px;
+  background: #f9fafb;
   color: var(--text-dark);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.18s, box-shadow 0.18s, background 0.22s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* hover and focus */
+.form-input:hover,
+.form-grid textarea:hover,
+.form-grid select:hover {
+  background: #fff;
 }
 
 .form-input:focus,
@@ -117,24 +147,38 @@
 .form-grid select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
 }
 
-/* form actions */
+/* date fields grid */
+.form-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* form actions area */
 .form-actions {
   display: flex;
-  gap: 12px;
+  gap: 14px;
   justify-content: flex-end;
+  margin-top: 8px;
 }
 
+/* button styles */
 .btn {
-  padding: 10px 18px;
+  padding: 12px 20px;
   font-weight: 700;
   font-size: 14px;
   border-radius: 10px;
   border: none;
   cursor: pointer;
-  transition: all 0.25s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .btn.primary {
@@ -143,15 +187,25 @@
 }
 
 .btn.primary:hover {
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(37, 99, 235, 0.18);
 }
 
 .btn.secondary {
   background: #fff;
-  border: 1px solid rgba(10, 30, 80, 0.15);
+  border: 1px solid rgba(10, 30, 80, 0.12);
   color: var(--text-dark);
 }
 
 .btn.secondary:hover {
   background: #f1f5f9;
 }
+
+/* Smaller responsive tweaks */
+@media (max-width: 980px) {
+  .form-dates { grid-template-columns: 1fr; }
+  .create-panel { flex-basis: 100%; }
+  .actions-column { flex-basis: 100%; }
+}
+
+/* keep the rest of the earlier project styles intact (if any) */
