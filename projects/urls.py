@@ -18,4 +18,9 @@ urlpatterns = [
 
     # AJAX endpoints
     path("ldap-search/", views.ldap_search, name="ldap_search"),
+
+    # New endpoints required by the mapping UI and live-refresh:
+    path("map-coes/", views.map_coes, name="map_coes"),
+    path("api/coes/", views.api_coes, name="api_coes"),
+    path("api/projects/", views.api_projects, name="api_projects"),
 ]

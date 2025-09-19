@@ -1,16 +1,14 @@
 {% extends "base.html" %}
 {% load static %}
 
-
 {% block content %}
-<!-- include page-specific stylesheet -->
 <link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
 
 <div class="panel" style="padding:20px 22px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <div>
       <h2 style="margin:0">Projects</h2>
-      <div class="muted" style="color:var(--muted);font-size:13px">List of projects — edit or delete when required</div>
+      <div class="muted" style="font-size:13px">List of projects — edit or delete when required</div>
     </div>
     <div>
       <a href="{% url 'projects:create' %}" class="btn primary" style="text-decoration:none">＋ New Project</a>
@@ -18,51 +16,38 @@
   </div>
 
   <div style="overflow:auto">
-    <table class="project-table" aria-describedby="projectsTable">
+    <table class="project-table" aria-describedby="projectsTable" style="width:100%;border-collapse:collapse">
       <thead>
         <tr>
-          <th>Name</th>
-          <th style="width:160px">PDL</th>
-          <th style="width:120px">Start</th>
-          <th style="width:120px">End</th>
-          <th>Description</th>
-          <th style="width:150px;text-align:right">Actions</th>
+          <th style="padding:10px">Name</th>
+          <th style="padding:10px">Description</th>
+          <th style="padding:10px">Start Date</th>
+          <th style="padding:10px">End Date</th>
+          <th style="padding:10px">PDL</th>
+          <th style="padding:10px;width:140px;text-align:center">Mapped COEs</th>
+          <th style="padding:10px;width:140px">Actions</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="projectsTableBody">
         {% for p in projects %}
-        <tr>
-          <td>{{ p.name }}</td>
-          <td>{{ p.pdl_name|default:"-" }}</td>
-          <td>{{ p.start_date|default:"-" }}</td>
-          <td>{{ p.end_date|default:"-" }}</td>
-          <td>{{ p.description|default:"-" }}</td>
-          <td style="text-align:right">
-            <div class="action-buttons" role="group" aria-label="Project actions for {{ p.name }}">
-              <a href="{% url 'projects:edit' p.id %}" class="action-btn edit project-action project-action--edit">✎ Edit</a>
-
-              <form method="post" action="{% url 'projects:delete' p.id %}" style="display:inline" onsubmit="return confirmDelete(event, '{{ p.name|escapejs }}')">
-                {% csrf_token %}
-                <button type="submit" class="action-btn delete project-action project-action--delete">🗑 Delete</button>
-              </form>
-            </div>
-          </td>
-        </tr>
+          <tr>
+            <td style="padding:10px">{{ p.name }}</td>
+            <td style="padding:10px;max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.description }}</td>
+            <td style="padding:10px">{{ p.start_date|date:"Y-m-d" }}</td>
+            <td style="padding:10px">{{ p.end_date|date:"Y-m-d" }}</td>
+            <td style="padding:10px">{{ p.pdl_username|default:"" }}</td>
+            <td style="padding:10px;text-align:center">{{ p.mapped_coe_count|default:0 }}</td>
+            <td style="padding:10px">
+              <a class="btn-light small" href="{% url 'projects:edit' p.id %}">Edit</a>
+              <a class="btn-light small danger" href="{% url 'projects:delete' p.id %}" onclick="return confirm('Delete this project? This action cannot be undone.')">Delete</a>
+            </td>
+          </tr>
         {% empty %}
-        <tr><td colspan="6" style="padding:18px;text-align:center">No projects found.</td></tr>
+          <tr><td colspan="7" style="padding:18px;text-align:center">No projects found.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
 
-<script>
-  function confirmDelete(e, name) {
-    if (!confirm("Delete project \"" + name + "\"? This action cannot be undone.")) {
-      e.preventDefault();
-      return false;
-    }
-    return true;
-  }
-</script>
 {% endblock %}
