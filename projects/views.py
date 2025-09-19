@@ -7,9 +7,17 @@ from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAll
 from django.views.decorators.http import require_GET, require_POST
 import mysql.connector
 from mysql.connector import Error, IntegrityError
+import json
+from datetime import datetime
+from django.shortcuts import render
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
+from django.db import connection, transaction
+from django.views.decorators.http import require_http_methods
+from django.contrib.auth.decorators import login_required
 
 logger = logging.getLogger(__name__)
 
+HOURS_AVAILABLE_PER_MONTH = 183.75
 
 def get_connection():
     dbs = settings.DATABASES.get("default", {})
@@ -24,10 +32,10 @@ def get_connection():
     )
 
 
-def _ensure_user_from_ldap(samaccountname):
+def _ensure_user_from_ldap(request,samaccountname):
     if not samaccountname:
         return None
-    sam = samaccountname.strip()
+    sam = request.session.get("ldap_username")
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
     try:
@@ -185,7 +193,7 @@ def create_project(request):
 
         pdl_user_id = None
         if pdl_username:
-            pdl_user_id = _ensure_user_from_ldap(pdl_username)
+            pdl_user_id = _ensure_user_from_ldap(request,pdl_username)
 
         conn = get_connection()
         cur = conn.cursor()
@@ -248,7 +256,7 @@ def edit_project(request, project_id):
 
         pdl_user_id = None
         if pdl_username:
-            pdl_user_id = _ensure_user_from_ldap(pdl_username)
+            pdl_user_id = _ensure_user_from_ldap(request,pdl_username)
 
         conn = get_connection()
         cur = conn.cursor()
@@ -317,7 +325,7 @@ def create_coe(request):
 
     leader_user_id = None
     if leader_username:
-        leader_user_id = _ensure_user_from_ldap(leader_username)
+        leader_user_id = _ensure_user_from_ldap(request,leader_username)
 
     conn2 = get_connection()
     cur2 = conn2.cursor()
@@ -350,7 +358,7 @@ def edit_coe(request, coe_id):
 
     leader_user_id = None
     if leader_username:
-        leader_user_id = _ensure_user_from_ldap(leader_username)
+        leader_user_id = _ensure_user_from_ldap(request,leader_username)
 
     conn = get_connection()
     cur = conn.cursor()
@@ -399,7 +407,7 @@ def create_domain(request):
 
     lead_user_id = None
     if lead_username:
-        lead_user_id = _ensure_user_from_ldap(lead_username)
+        lead_user_id = _ensure_user_from_ldap(request,lead_username)
 
     conn2 = get_connection()
     cur2 = conn2.cursor()
@@ -437,7 +445,7 @@ def edit_domain(request, domain_id):
 
     lead_user_id = None
     if lead_username:
-        lead_user_id = _ensure_user_from_ldap(lead_username)
+        lead_user_id = _ensure_user_from_ldap(request,lead_username)
 
     conn = get_connection()
     cur = conn.cursor()
@@ -610,7 +618,7 @@ def create_project(request):
 
         pdl_user_id = None
         if pdl_username:
-            pdl_user_id = _ensure_user_from_ldap(pdl_username)
+            pdl_user_id = _ensure_user_from_ldap(request,pdl_username)
 
         conn = get_connection()
         cur = conn.cursor()
@@ -665,7 +673,7 @@ def edit_project(request, project_id):
 
         pdl_user_id = None
         if pdl_username:
-            pdl_user_id = _ensure_user_from_ldap(pdl_username)
+            pdl_user_id = _ensure_user_from_ldap(request,pdl_username)
 
         conn = get_connection()
         cur = conn.cursor()
@@ -720,7 +728,7 @@ def map_coes(request):
         pdl_username = request.POST.get("pdl_username") or None
         pdl_user_id = None
         if pdl_username:
-            pdl_user_id = _ensure_user_from_ldap(pdl_username)
+            pdl_user_id = _ensure_user_from_ldap(request.pdl_username)
 
         conn = get_connection()
         cur = conn.cursor()
@@ -769,3 +777,285 @@ def api_projects(request):
     for p in projects:
         p['mapped_coe_count'] = counts.get(p['id'], 0)
     return JsonResponse({"projects": projects})
+
+# helper to run queries returning dict rows
+def dictfetchall(cursor):
+    cols = [c[0] for c in cursor.description]
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+def allocations_monthly(request):
+    print("Allocations monthly view called")
+    """
+    Page that shows monthly allocations tabs for projects where current user is PDL.
+    GET params:
+      - month: YYYY-MM (optional, defaults to current month)
+      - project_id: active tab (optional)
+    """
+    username = request.session.get('ldap_username')
+    print("Allocations monthly for user:", username)
+    # month param => first day of month
+    month_str = request.GET.get('month')
+    if month_str:
+        try:
+            month_start = datetime.strptime(month_str + "-01", "%Y-%m-%d").date()
+        except Exception:
+            month_start = datetime.today().replace(day=1).date()
+    else:
+        month_start = datetime.today().replace(day=1).date()
+
+    project_id_active = request.GET.get('project_id')
+
+    # 1) find user row in users table
+    with connection.cursor() as cur:
+        cur.execute("SELECT id, username FROM users WHERE username = %s LIMIT 1", [username])
+        me = cur.fetchone()
+        me_id = me[0] if me else None
+
+    # 2) find projects where pdl_user_id == me_id
+    projects = []
+    with connection.cursor() as cur:
+        cur.execute("""
+          SELECT id, name, start_date, end_date
+          FROM projects
+          WHERE pdl_user_id = %s
+          ORDER BY name
+        """, [me_id])
+        projects = dictfetchall(cur)
+
+    # pick active project if not provided
+    if not project_id_active and projects:
+        project_id_active = projects[0]['id']
+
+    # 3) fetch COEs mapped to the active project (project_coes -> coes)
+    coes = []
+    domains = {}
+    if project_id_active:
+        with connection.cursor() as cur:
+            cur.execute("""
+              SELECT c.id, c.name
+              FROM project_coes pc
+              JOIN coes c ON pc.coe_id = c.id
+              WHERE pc.project_id = %s
+              ORDER BY c.name
+            """, [project_id_active])
+            coes = dictfetchall(cur)
+
+            # get domains for the coe list
+            coe_ids = [str(c['id']) for c in coes]
+            if coe_ids:
+                cur.execute(f"""
+                  SELECT id, coe_id, name
+                  FROM domains
+                  WHERE coe_id IN ({','.join(['%s']*len(coe_ids))})
+                  ORDER BY name
+                """, coe_ids)
+                rows = dictfetchall(cur)
+                for r in rows:
+                    domains.setdefault(r['coe_id'], []).append(r)
+
+    # 4) fetch existing allocation_items and allocations for this project and month
+    allocation_map = {}  # coe_id -> list of items
+    if project_id_active:
+        with connection.cursor() as cur:
+            cur.execute("""
+              SELECT ai.id as item_id, ai.coe_id, ai.domain_id, ai.user_id, ai.user_ldap, ai.total_hours,
+                     u.username as username, d.name as domain_name
+              FROM allocation_items ai
+              LEFT JOIN users u ON ai.user_id = u.id
+              LEFT JOIN domains d ON ai.domain_id = d.id
+              WHERE ai.project_id = %s AND ai.allocation_id IN (
+                SELECT id FROM allocations WHERE project_id = %s AND month_start = %s
+              )
+              ORDER BY ai.coe_id, u.username
+            """, [project_id_active, project_id_active, month_start])
+            rows = dictfetchall(cur)
+            for r in rows:
+                allocation_map.setdefault(r['coe_id'], []).append(r)
+
+    # hours available per employee in month (business rule) - configurable; default 160
+    hours_available = int(getattr(__import__('django.conf').conf.settings, 'HOURS_AVAILABLE_PER_MONTH', 160))
+
+    context = {
+        'projects': projects,
+        'active_project_id': int(project_id_active) if project_id_active else None,
+        'coes': coes,
+        'domains_map': domains,
+        'allocation_map': allocation_map,
+        'month_start': month_start,
+        'hours_available': hours_available,
+    }
+    return render(request, 'projects/monthly_allocations.html', context)
+
+
+@require_http_methods(["POST"])
+def save_monthly_allocations(request):
+    """
+    Accepts JSON payload:
+    {
+      "project_id": <int>,
+      "month_start": "YYYY-MM-01",
+      "items": [
+        {"coe_id": 10, "domain_id": 21 or null, "user_ldap": "jdoe", "total_hours": 120},
+        ...
+      ]
+    }
+
+    Policy:
+      - Only the project's PDL (matched via users.ldap_id OR auth_user.id) or admin can save.
+      - Uses request.session.get("ldap_username") as canonical LDAP username.
+    """
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponseBadRequest("Invalid JSON")
+
+    project_id = payload.get('project_id')
+    month_start = payload.get('month_start')
+    items = payload.get('items', [])
+
+    if not project_id or not month_start:
+        return HttpResponseBadRequest("project_id and month_start are required")
+
+    try:
+        month_date = datetime.strptime(month_start, "%Y-%m-%d").date()
+    except Exception:
+        return HttpResponseBadRequest("month_start must be YYYY-MM-01")
+
+    # canonical ldap username from session
+    session_ldap = request.session.get("ldap_username")
+    auth_user_id = request.user.id
+    # Sanity check: verify project exists and current user is PDL (via ldap mapping) or admin
+    with connection.cursor() as cur:
+        cur.execute("SELECT pdl_user_id FROM projects WHERE id = %s LIMIT 1", [project_id])
+        row = cur.fetchone()
+        if not row:
+            return HttpResponseBadRequest("Invalid project")
+        pdl_user_id = row[0]
+
+        # Determine whether allowed:
+        # - If pdl_user_id equals auth_user_id => allowed
+        # - OR if pdl_user_id references users table where users.ldap_id == session_ldap => allowed
+        allowed = False
+        if pdl_user_id == auth_user_id:
+            allowed = True
+        else:
+            if session_ldap:
+                cur.execute("SELECT 1 FROM users WHERE id = %s AND (ldap_id = %s OR username = %s) LIMIT 1", [pdl_user_id, session_ldap, session_ldap])
+                if cur.fetchone():
+                    allowed = True
+
+        # allow admin (username 'admin') for testing/backdoor as before
+        if not allowed and request.user.username == 'admin':
+            allowed = True
+
+        if not allowed:
+            return HttpResponseForbidden("You are not authorized to save allocations for this project")
+
+    # transaction: upsert allocations and allocation_items
+    try:
+        with transaction.atomic():
+            ldap_to_alloc_id = {}
+
+            # Build unique list of ldap usernames from incoming items
+            unique_ldaps = sorted({(it.get('user_ldap') or '').strip() for it in items if it.get('user_ldap')})
+            for ldap in unique_ldaps:
+                if not ldap:
+                    continue
+                # lookup user by ldap_id or username
+                with connection.cursor() as cur:
+                    cur.execute("SELECT id FROM users WHERE ldap_id = %s OR username = %s LIMIT 1", [ldap, ldap])
+                    u = cur.fetchone()
+                    if u:
+                        user_id = u[0]
+                    else:
+                        # insert minimal user row, setting both username and ldap_id to ldap
+                        cur.execute("INSERT INTO users (username, ldap_id, role, created_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)", [ldap, ldap, 'EMPLOYEE'])
+                        # fetch last inserted id
+                        try:
+                            user_id = cur.lastrowid
+                        except Exception:
+                            cur.execute("SELECT LAST_INSERT_ID()")
+                            user_id = cur.fetchone()[0]
+
+                    # ensure allocations row exists for this user/project/month
+                    with connection.cursor() as cur2:
+                        cur2.execute("SELECT id FROM allocations WHERE user_id = %s AND project_id = %s AND month_start = %s LIMIT 1", [user_id, project_id, month_date])
+                        a = cur2.fetchone()
+                        if a:
+                            alloc_id = a[0]
+                        else:
+                            cur2.execute("INSERT INTO allocations (user_id, project_id, month_start, total_hours, pending_hours) VALUES (%s, %s, %s, 0, 0)", [user_id, project_id, month_date])
+                            try:
+                                alloc_id = cur2.lastrowid
+                            except Exception:
+                                cur2.execute("SELECT LAST_INSERT_ID()")
+                                alloc_id = cur2.fetchone()[0]
+
+                    ldap_to_alloc_id[ldap] = (alloc_id, user_id)
+
+            # Upsert allocation_items
+            incoming_keys = set()
+            for it in items:
+                ldap = (it.get('user_ldap') or '').strip()
+                if not ldap:
+                    continue
+                alloc_tuple = ldap_to_alloc_id.get(ldap)
+                if not alloc_tuple:
+                    # skip items where we couldn't create/find a user
+                    continue
+                alloc_id, user_id = alloc_tuple
+                try:
+                    coe_id = int(it.get('coe_id')) if it.get('coe_id') else None
+                except Exception:
+                    coe_id = None
+                try:
+                    domain_id = int(it.get('domain_id')) if it.get('domain_id') else None
+                except Exception:
+                    domain_id = None
+                try:
+                    hours = int(it.get('total_hours') or 0)
+                except Exception:
+                    hours = 0
+
+                if not coe_id:
+                    continue
+
+                incoming_keys.add((alloc_id, coe_id, user_id))
+
+                with connection.cursor() as cur:
+                    cur.execute("SELECT id FROM allocation_items WHERE allocation_id = %s AND coe_id = %s AND user_id = %s LIMIT 1", [alloc_id, coe_id, user_id])
+                    existing = cur.fetchone()
+                    if existing:
+                        item_id = existing[0]
+                        cur.execute("UPDATE allocation_items SET domain_id = %s, total_hours = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s", [domain_id, hours, item_id])
+                    else:
+                        cur.execute("INSERT INTO allocation_items (allocation_id, project_id, coe_id, domain_id, user_id, user_ldap, total_hours) VALUES (%s, %s, %s, %s, %s, %s, %s)", [alloc_id, project_id, coe_id, domain_id, user_id, ldap, hours])
+
+            # Delete allocation_items not present in incoming_keys for this project+month
+            with connection.cursor() as cur:
+                cur.execute("""
+                  SELECT ai.id, ai.allocation_id, ai.coe_id, ai.user_id
+                  FROM allocation_items ai
+                  JOIN allocations a ON ai.allocation_id = a.id
+                  WHERE ai.project_id = %s AND a.month_start = %s
+                """, [project_id, month_date])
+                existing_items = cur.fetchall()
+                for item in existing_items:
+                    ai_id, alloc_id, coe_id, user_id = item
+                    if (alloc_id, coe_id, user_id) not in incoming_keys:
+                        cur.execute("DELETE FROM allocation_items WHERE id = %s", [ai_id])
+
+            # Recompute allocations.total_hours and pending_hours
+            with connection.cursor() as cur:
+                cur.execute("SELECT id FROM allocations WHERE project_id = %s AND month_start = %s", [project_id, month_date])
+                alloc_rows = cur.fetchall()
+                for ar in alloc_rows:
+                    alloc_id = ar[0]
+                    cur.execute("SELECT COALESCE(SUM(total_hours),0) FROM allocation_items WHERE allocation_id = %s", [alloc_id])
+                    total = cur.fetchone()[0] or 0
+                    cur.execute("UPDATE allocations SET total_hours = %s, pending_hours = %s WHERE id = %s", [total, total, alloc_id])
+
+        return JsonResponse({"ok": True, "message": "Allocations saved."})
+    except Exception as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+

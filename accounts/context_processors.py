@@ -44,7 +44,7 @@ MENU_TREE = [
         "url": "#",
         "roles": ["ADMIN", "PDL", "COE_LEADER", "TEAM_LEAD", "EMPLOYEE"],
         "submenus": [
-            {"key": "monthly", "title": "Monthly Allocation", "url": "#", "roles": ["PDL","ADMIN"]},
+            {"key": "monthly", "title": "Monthly Allocation", "url": reverse_lazy("projects:allocations_monthly"), "roles": ["PDL","ADMIN"]},
             {"key": "weekly", "title": "Weekly Allocation", "url": "#", "roles": ["COE_LEADER","TEAM_LEAD","ADMIN"]},
             {"key": "my_alloc", "title": "My Allocations", "url": "#", "roles": ["EMPLOYEE"]},
         ],

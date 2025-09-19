@@ -212,6 +212,27 @@ class DatabaseInitializer:
                     `display_name` VARCHAR(128) NOT NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """,
+                """
+                CREATE TABLE IF NOT EXISTS `allocation_items` (
+                      `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                      `allocation_id` BIGINT NOT NULL,    -- FK to allocations.id
+                      `project_id` BIGINT NOT NULL,
+                      `coe_id` BIGINT NOT NULL,
+                      `domain_id` BIGINT,                 -- nullable
+                      `user_id` BIGINT,                   -- FK to users.id (created on demand via ldap username)
+                      `user_ldap` VARCHAR(255) NOT NULL,  -- original ldap identifier / username
+                      `total_hours` INT UNSIGNED NOT NULL DEFAULT 0,
+                      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                      `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                      UNIQUE KEY uq_alloc_item (allocation_id, coe_id, user_id),
+                      FOREIGN KEY (`allocation_id`) REFERENCES `allocations`(`id`) ON DELETE CASCADE,
+                      FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE,
+                      FOREIGN KEY (`coe_id`) REFERENCES `coes`(`id`) ON DELETE CASCADE,
+                      FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON DELETE SET NULL,
+                      FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+                """
             ]
         )
 

@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% load static %}
+{% load dict_get %}
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<link rel="stylesheet" href="{% static 'projects/css/projects-actions.css' %}">
+<style>
+/* Page-level layout */
+.alloc-page { display:flex; flex-direction:column; gap:18px; padding-bottom:40px; }
+
+/* Tabs for projects */
+.proj-tabs { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.proj-tab {
+  padding:8px 14px;
+  background: linear-gradient(90deg,#f8fbff,#f0f6ff);
+  border:1px solid #dce7ff;
+  border-radius:8px;
+  cursor:pointer;
+  font-weight:700;
+}
+.proj-tab.active { background: linear-gradient(90deg,#2563eb,#1e40af); color:#fff; box-shadow: 0 8px 24px rgba(37,99,235,0.12); }
+
+.alloc-header {
+  display:flex;
+  gap:18px;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+}
+
+.summary-cards { display:flex; gap:12px; align-items:center; }
+.summary-card {
+  background:#fff; border-radius:10px; padding:12px 14px; border:1px solid rgba(10,30,80,0.04);
+  min-width:140px;
+}
+.summary-card h4 { margin:0 0 6px 0; font-size:13px; color:#6b7280; font-weight:700; }
+.summary-card p { margin:0; font-weight:800; font-size:16px; color:#0b1320; }
+
+/* main table area */
+.coe-block {
+  background:#fff; border-radius:12px; padding:14px; border:1px solid rgba(10,30,80,0.04);
+  box-shadow: 0 8px 30px rgba(2,6,23,0.04);
+  margin-bottom:12px;
+}
+.coe-title { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; font-weight:800; }
+
+.alloc-table { width:100%; border-collapse:collapse; }
+.alloc-table th, .alloc-table td { padding:8px 10px; text-align:left; border-bottom:1px solid rgba(0,0,0,0.04); }
+.alloc-table thead th { font-weight:800; color:#374151; }
+.add-row-btn { background:transparent; border:none; color:var(--accent); cursor:pointer; font-weight:700; }
+
+.controls { display:flex; gap:10px; align-items:center; }
+.save-btn { padding:10px 18px; border-radius:8px; font-weight:800; border:none; background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; cursor:pointer; }
+.cancel-btn { padding:10px 14px; border-radius:8px; border:1px solid rgba(10,30,80,0.08); background:#fff; cursor:pointer; }
+
+.empty-note { color:#6b7280; font-size:13px; padding:10px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="alloc-page container" style="max-width:1200px;margin:18px auto;">
+
+  <!-- Top tabs -->
+  <div class="proj-tabs" id="projTabs">
+    {% for p in projects %}
+      <div class="proj-tab {% if p.id == active_project_id %}active{% endif %}" data-project-id="{{ p.id }}">{{ p.name }}</div>
+    {% empty %}
+      <div class="empty-note">You are not PDL for any program.</div>
+    {% endfor %}
+  </div>
+
+  <!-- Header summary -->
+  <div class="alloc-header">
+    <div class="summary-cards" id="summaryCards">
+      <div class="summary-card"><h4>Total Headcount</h4><p id="sumHeadcount">0</p></div>
+      <div class="summary-card"><h4>Total Hours Allocated</h4><p id="sumHours">0</p></div>
+      <div class="summary-card"><h4>Avg Hours / Employee</h4><p id="sumAvgHours">0</p></div>
+      <div class="summary-card"><h4>Total FTE</h4><p id="sumFTE">0</p></div>
+    </div>
+    <div class="controls">
+      <label>Month: <input type="month" id="monthPicker" value="{{ month_start|date:'Y-m' }}" class="form-input" style="padding:8px 10px; width:160px;"></label>
+      <button class="save-btn" id="saveAllocBtn">Save</button>
+      <a href="{% url 'projects:list' %}" class="cancel-btn">Back</a>
+    </div>
+  </div>
+
+  <!-- COEs -->
+  <div id="coesContainer">
+    {% if coes %}
+      {% for coe in coes %}
+        <div class="coe-block" data-coe-id="{{ coe.id }}">
+          <div class="coe-title">
+            <div style="display:flex;align-items:center;gap:12px;">
+              <div style="font-size:16px;font-weight:800">{{ coe.name }}</div>
+              <div class="muted" style="font-size:13px;">Domains: {% if domains_map|get:coe.id %}{{ domains_map|get:coe.id|length }}{% else %}0{% endif %}</div>
+            </div>
+            <button class="add-row-btn" data-coe-id="{{ coe.id }}">+ Add resource</button>
+          </div>
+
+          <!-- Hidden domain template -->
+          <select class="domain-template" data-coe-id="{{ coe.id }}" style="display:none">
+            <option value="">-- Select domain --</option>
+            {% for d in domains_map|get:coe.id %}
+              <option value="{{ d.id }}">{{ d.name }}</option>
+            {% endfor %}
+          </select>
+
+          <table class="alloc-table" data-coe-id="{{ coe.id }}">
+            <thead>
+              <tr><th style="width:36px"></th><th>Resource (LDAP)</th><th>Domain</th><th style="width:160px">Total Hours</th><th style="width:120px">Actions</th></tr>
+            </thead>
+            <tbody>
+              {% for item in allocation_map|get:coe.id %}
+                <tr data-item-id="{{ item.item_id }}">
+                  <td></td>
+                  <td><input type="text" class="form-input ldap-picker" value="{{ item.username|default:item.user_ldap }}" data-ldap="{{ item.user_ldap }}" placeholder="Search user..." /></td>
+                  <td>
+                    <select class="form-input domain-select">
+                      <option value="">-- Select domain --</option>
+                      {% for d in domains_map|get:coe.id %}
+                        <option value="{{ d.id }}" {% if d.id == item.domain_id %}selected{% endif %}>{{ d.name }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  <td><input type="number" min="0" class="form-input hours-input" value="{{ item.total_hours }}" /></td>
+                  <td><button class="btn secondary remove-row-btn">Remove</button></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+
+          {% if not allocation_map|get:coe.id %}
+            <div class="empty-note">No resources added yet for this COE. Click + Add resource to add.</div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-note">No COEs mapped to the selected Program.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div id="ldapSuggestions" class="autocomplete-list" style="position:fixed; z-index:2200; display:none;"></div>
+
+{% block extra_js %}
+<script>
+// state
+const hoursAvailable = {{ hours_available|default:160 }};
+let activeProjectId = {{ active_project_id|default:'null' }};
+const monthStart = document.getElementById('monthPicker');
+
+// tabs
+document.querySelectorAll('.proj-tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    const url=new URL(window.location.href);
+    url.searchParams.set('project_id',tab.dataset.projectId);
+    url.searchParams.set('month',monthStart.value);
+    window.location=url.toString();
+  });
+});
+
+// add row
+function createRowHtml(coeId){
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td></td>
+    <td><input type="text" class="form-input ldap-picker" data-ldap="" placeholder="Search user..."></td>
+    <td><select class="form-input domain-select"></select></td>
+    <td><input type="number" min="0" class="form-input hours-input" value="0"></td>
+    <td><button class="btn secondary remove-row-btn">Remove</button></td>`;
+  // populate domains
+  const template=document.querySelector(`.domain-template[data-coe-id="${coeId}"]`);
+  if(template){ tr.querySelector('select').innerHTML=template.innerHTML; }
+  tr.querySelector('.remove-row-btn').addEventListener('click',e=>{e.preventDefault();tr.remove();computeSummary();});
+  wireLdapPicker(tr.querySelector('.ldap-picker'));
+  tr.querySelector('.hours-input').addEventListener('input',computeSummary);
+  return tr;
+}
+document.querySelectorAll('.add-row-btn').forEach(btn=>{
+  btn.addEventListener('click',e=>{
+    e.preventDefault();
+    const tbody=document.querySelector(`.alloc-table[data-coe-id="${btn.dataset.coeId}"] tbody`);
+    tbody.appendChild(createRowHtml(btn.dataset.coeId));
+    computeSummary();
+  });
+});
+
+// summary
+function computeSummary(){
+  let total=0;const people=new Set();
+  document.querySelectorAll('.alloc-table tbody tr').forEach(r=>{
+    const ldap=(r.querySelector('.ldap-picker')?.dataset.ldap||'').trim();
+    const hrs=Number(r.querySelector('.hours-input')?.value||0);
+    if(ldap)people.add(ldap);
+    total+=hrs;
+  });
+  const head=people.size,avg=head?(total/head).toFixed(2):0,fte=(total/hoursAvailable).toFixed(2);
+  document.getElementById('sumHeadcount').innerText=head;
+  document.getElementById('sumHours').innerText=total;
+  document.getElementById('sumAvgHours').innerText=avg;
+  document.getElementById('sumFTE').innerText=fte;
+}
+computeSummary();
+
+// LDAP picker
+const ldapSuggestions=document.getElementById('ldapSuggestions');
+function wireLdapPicker(input){
+  if(!input)return;
+  let timer;let items=[];
+  input.addEventListener('input',()=>{
+    const q=input.value.trim();input.dataset.ldap='';
+    if(q.length<3){ldapSuggestions.style.display='none';return;}
+    clearTimeout(timer);
+    timer=setTimeout(()=>{
+      fetch(`/projects/ldap-search/?q=${encodeURIComponent(q)}`).then(r=>r.json()).then(data=>{
+        items=data.results||[];ldapSuggestions.innerHTML='';
+        if(!items.length){ldapSuggestions.style.display='none';return;}
+        items.forEach(it=>{
+          const d=document.createElement('div');d.className='autocomplete-item';
+          d.innerHTML=`<div class="a-title">${it.cn||it.sAMAccountName}</div><div class="a-sub">${it.mail||''}</div>`;
+          d.addEventListener('click',()=>{input.value=it.cn||it.sAMAccountName;input.dataset.ldap=it.sAMAccountName||it.mail||it.cn;ldapSuggestions.style.display='none';computeSummary();});
+          ldapSuggestions.appendChild(d);
+        });
+        const rect=input.getBoundingClientRect();
+        ldapSuggestions.style.left=rect.left+'px';ldapSuggestions.style.top=(rect.bottom+window.scrollY)+'px';ldapSuggestions.style.width=Math.max(280,rect.width)+'px';
+        ldapSuggestions.style.display='block';
+      });
+    },200);
+  });
+}
+document.querySelectorAll('.ldap-picker').forEach(inp=>wireLdapPicker(inp));
+
+// save
+document.getElementById('saveAllocBtn').addEventListener('click',()=>{
+  const items=[];
+  document.querySelectorAll('.coe-block').forEach(cb=>{
+    cb.querySelectorAll('tbody tr').forEach(r=>{
+      const ldap=(r.querySelector('.ldap-picker')?.dataset.ldap||'').trim();
+      if(!ldap)return;
+      items.push({
+        coe_id:Number(cb.dataset.coeId),
+        domain_id:r.querySelector('.domain-select')?.value||null,
+        user_ldap:ldap,
+        total_hours:Number(r.querySelector('.hours-input')?.value||0)
+      });
+    });
+  });
+  const payload={project_id:activeProjectId,month_start:(document.getElementById('monthPicker').value||'')+'-01',items:items};
+  fetch("{% url 'projects:save_monthly_allocations' %}",{
+    method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},body:JSON.stringify(payload)
+  }).then(r=>r.json()).then(resp=>{
+    if(resp.ok){alert('Allocations saved.');window.location.reload();}
+    else{alert('Save failed: '+(resp.error||JSON.stringify(resp)));}
+  });
+});
+function getCookie(name){const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');return v?v.pop():'';}
+</script>
+{% endblock %}
+{% endblock %}
