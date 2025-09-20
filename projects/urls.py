@@ -23,6 +23,6 @@ urlpatterns = [
     path("map-coes/", views.map_coes, name="map_coes"),
     path("api/coes/", views.api_coes, name="api_coes"),
     path("api/projects/", views.api_projects, name="api_projects"),
-path('allocations/monthly/', views.allocations_monthly, name='allocations_monthly'),
+    path('allocations/monthly/', views.allocations_monthly, name='allocations_monthly'),
     path('allocations/monthly/save/', views.save_monthly_allocations, name='save_monthly_allocations'),
 ]

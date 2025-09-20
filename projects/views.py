@@ -784,16 +784,11 @@ def dictfetchall(cursor):
     return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
 def allocations_monthly(request):
-    print("Allocations monthly view called")
-    """
-    Page that shows monthly allocations tabs for projects where current user is PDL.
-    GET params:
-      - month: YYYY-MM (optional, defaults to current month)
-      - project_id: active tab (optional)
-    """
-    username = request.session.get('ldap_username')
-    print("Allocations monthly for user:", username)
-    # month param => first day of month
+    print("allcoations monthly  view")
+    user = request.user
+    username = request.session.get("ldap_username") or user.username
+
+    # month
     month_str = request.GET.get('month')
     if month_str:
         try:
@@ -805,13 +800,13 @@ def allocations_monthly(request):
 
     project_id_active = request.GET.get('project_id')
 
-    # 1) find user row in users table
+    # find user row in users table
     with connection.cursor() as cur:
-        cur.execute("SELECT id, username FROM users WHERE username = %s LIMIT 1", [username])
+        cur.execute("SELECT id FROM users WHERE username = %s OR ldap_id = %s LIMIT 1", [username, username])
         me = cur.fetchone()
         me_id = me[0] if me else None
 
-    # 2) find projects where pdl_user_id == me_id
+    # projects where this user is PDL
     projects = []
     with connection.cursor() as cur:
         cur.execute("""
@@ -822,11 +817,10 @@ def allocations_monthly(request):
         """, [me_id])
         projects = dictfetchall(cur)
 
-    # pick active project if not provided
     if not project_id_active and projects:
         project_id_active = projects[0]['id']
 
-    # 3) fetch COEs mapped to the active project (project_coes -> coes)
+    # coes + domains
     coes = []
     domains = {}
     if project_id_active:
@@ -839,22 +833,20 @@ def allocations_monthly(request):
               ORDER BY c.name
             """, [project_id_active])
             coes = dictfetchall(cur)
-
-            # get domains for the coe list
-            coe_ids = [str(c['id']) for c in coes]
+            coe_ids = [c['id'] for c in coes]
             if coe_ids:
-                cur.execute(f"""
+                cur.execute("""
                   SELECT id, coe_id, name
                   FROM domains
-                  WHERE coe_id IN ({','.join(['%s']*len(coe_ids))})
+                  WHERE coe_id IN %s
                   ORDER BY name
-                """, coe_ids)
+                """, [tuple(coe_ids)])
                 rows = dictfetchall(cur)
                 for r in rows:
                     domains.setdefault(r['coe_id'], []).append(r)
 
-    # 4) fetch existing allocation_items and allocations for this project and month
-    allocation_map = {}  # coe_id -> list of items
+    # allocations map
+    allocation_map = {}
     if project_id_active:
         with connection.cursor() as cur:
             cur.execute("""
@@ -872,8 +864,30 @@ def allocations_monthly(request):
             for r in rows:
                 allocation_map.setdefault(r['coe_id'], []).append(r)
 
-    # hours available per employee in month (business rule) - configurable; default 160
-    hours_available = int(getattr(__import__('django.conf').conf.settings, 'HOURS_AVAILABLE_PER_MONTH', 160))
+    # hours available (global)
+    from decimal import Decimal
+
+    hours_available = Decimal(str(HOURS_AVAILABLE_PER_MONTH))
+
+    # 🔑 capacity per user for this project + month
+    capacity_map = {}
+    if project_id_active:
+        with connection.cursor() as cur:
+            cur.execute("""
+              SELECT ai.user_ldap, SUM(ai.total_hours) as allocated
+              FROM allocation_items ai
+              JOIN allocations a ON ai.allocation_id = a.id
+              WHERE ai.project_id = %s AND a.month_start = %s
+              GROUP BY ai.user_ldap
+            """, [project_id_active, month_start])
+            for row in cur.fetchall():
+                user_ldap, allocated = row
+                remaining = max(0, hours_available - (allocated or 0))
+                capacity_map[user_ldap] = {
+                    "allocated": allocated or 0,
+                    "remaining": remaining,
+                    "capacity": hours_available
+                }
 
     context = {
         'projects': projects,
@@ -883,8 +897,10 @@ def allocations_monthly(request):
         'allocation_map': allocation_map,
         'month_start': month_start,
         'hours_available': hours_available,
+        'capacity_map': capacity_map,   # 👈 pass to template
     }
     return render(request, 'projects/monthly_allocations.html', context)
+
 
 
 @require_http_methods(["POST"])

@@ -13,9 +13,8 @@
 <body>
 <header class="app-header">
   <div class="header-left">
-    <button class="mobile-toggle-btn" aria-label="menu">☰</button>
+    <!-- removed ☰ icon -->
     <div class="brand">
-      <!-- logo removed as requested -->
       <div class="brand-text">Program Resource Allocation System</div>
     </div>
   </div>
@@ -28,7 +27,7 @@
         <span class="user-avatar">{{ request.session.cn|slice:":1"|default:"U"|upper }}</span>
         <span class="user-meta">
           <span class="user-name">{{ request.session.cn|default:request.session.username|default:"User" }}</span>
-          <span class="user-role">{{ request.session.title|default:"" }}</span>
+          <span style="margin-left:6px;" class="user-role">{{ request.session.title|default:"" }}</span>
         </span>
         <svg class="caret" width="12" height="12" viewBox="0 0 24 24" fill="none">
           <path d="M6 9l6 6 6-6" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>

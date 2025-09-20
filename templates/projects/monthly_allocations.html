@@ -5,62 +5,71 @@
 <link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
 <link rel="stylesheet" href="{% static 'projects/css/projects-actions.css' %}">
 <style>
-/* Page-level layout */
+/* Page layout */
 .alloc-page { display:flex; flex-direction:column; gap:18px; padding-bottom:40px; }
-
-/* Tabs for projects */
 .proj-tabs { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.proj-tab {
-  padding:8px 14px;
-  background: linear-gradient(90deg,#f8fbff,#f0f6ff);
-  border:1px solid #dce7ff;
-  border-radius:8px;
-  cursor:pointer;
-  font-weight:700;
-}
-.proj-tab.active { background: linear-gradient(90deg,#2563eb,#1e40af); color:#fff; box-shadow: 0 8px 24px rgba(37,99,235,0.12); }
+.proj-tab { padding:8px 14px; border:1px solid #dce7ff; border-radius:8px; cursor:pointer; font-weight:700; }
+.proj-tab.active { background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; }
 
-.alloc-header {
-  display:flex;
-  gap:18px;
-  align-items:center;
-  justify-content:space-between;
-  flex-wrap:wrap;
-}
-
-.summary-cards { display:flex; gap:12px; align-items:center; }
-.summary-card {
-  background:#fff; border-radius:10px; padding:12px 14px; border:1px solid rgba(10,30,80,0.04);
-  min-width:140px;
-}
-.summary-card h4 { margin:0 0 6px 0; font-size:13px; color:#6b7280; font-weight:700; }
+/* Summary */
+.summary-cards { display:flex; gap:12px; flex-wrap:wrap; }
+.summary-card { background:#fff; border-radius:10px; padding:12px 14px; border:1px solid rgba(10,30,80,0.04); min-width:140px; }
+.summary-card h4 { margin:0 0 6px; font-size:13px; color:#6b7280; font-weight:700; }
 .summary-card p { margin:0; font-weight:800; font-size:16px; color:#0b1320; }
 
-/* main table area */
-.coe-block {
-  background:#fff; border-radius:12px; padding:14px; border:1px solid rgba(10,30,80,0.04);
-  box-shadow: 0 8px 30px rgba(2,6,23,0.04);
-  margin-bottom:12px;
-}
-.coe-title { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; font-weight:800; }
-
+/* COE blocks */
+.coe-block { background:#fff; border-radius:12px; padding:14px; border:1px solid rgba(10,30,80,0.04); margin-bottom:12px; box-shadow: 0 8px 30px rgba(2,6,23,0.03); }
+.coe-title { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-weight:800; }
 .alloc-table { width:100%; border-collapse:collapse; }
-.alloc-table th, .alloc-table td { padding:8px 10px; text-align:left; border-bottom:1px solid rgba(0,0,0,0.04); }
+.alloc-table th, .alloc-table td { padding:8px 10px; border-bottom:1px solid rgba(0,0,0,0.04); vertical-align: middle; }
 .alloc-table thead th { font-weight:800; color:#374151; }
-.add-row-btn { background:transparent; border:none; color:var(--accent); cursor:pointer; font-weight:700; }
+.add-row-btn { background:transparent; border:none; color:#2563eb; cursor:pointer; font-weight:700; }
 
-.controls { display:flex; gap:10px; align-items:center; }
-.save-btn { padding:10px 18px; border-radius:8px; font-weight:800; border:none; background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; cursor:pointer; }
-.cancel-btn { padding:10px 14px; border-radius:8px; border:1px solid rgba(10,30,80,0.08); background:#fff; cursor:pointer; }
+/* Remove / over-alloc */
+.remove-row-btn { padding:6px 8px; border-radius:6px; border:1px solid rgba(10,30,80,0.06); background:#fff; cursor:pointer; }
+.over-alloc { border-left:4px solid #dc2626 !important; background:rgba(220,38,38,0.04); }
+.over-alloc .hours-input { border:1px solid #dc2626 !important; background: #fff5f5; color:#7f1d1d; }
 
-.empty-note { color:#6b7280; font-size:13px; padding:10px 0; }
+/* Muted small text */
+.muted { color:#6b7280; font-size:11px; }
+
+/* Save button styling - ensure visible even if site CSS missing */
+.save-btn {
+  padding:10px 18px;
+  border-radius:8px;
+  font-weight:800;
+  border:none;
+  background:linear-gradient(90deg,#2563eb,#1e40af);
+  color:#fff;
+  cursor:pointer;
+  box-shadow: 0 8px 24px rgba(37,99,235,0.12);
+}
+.save-btn[disabled] {
+  opacity:0.5;
+  cursor:not-allowed;
+  box-shadow:none;
+}
+
+/* Disabled hours input */
+.hours-input[disabled] { background:#f3f4f6; color:#9ca3af; cursor:not-allowed; }
+
+/* LDAP suggestions */
+.autocomplete-list { background:#fff; border:1px solid rgba(0,0,0,0.06); border-radius:8px; box-shadow: 0 12px 40px rgba(2,6,23,0.08); overflow:hidden; }
+.autocomplete-item { padding:8px 10px; cursor:pointer; border-bottom:1px solid rgba(0,0,0,0.03); }
+.autocomplete-item:last-child{ border-bottom:none; }
+.autocomplete-item:hover{ background:rgba(37,99,235,0.04); }
+
+/* small responsive tweaks */
+@media (max-width:900px){
+  .summary-cards{flex-direction:column;}
+}
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="alloc-page container" style="max-width:1200px;margin:18px auto;">
 
-  <!-- Top tabs -->
+  <!-- Tabs -->
   <div class="proj-tabs" id="projTabs">
     {% for p in projects %}
       <div class="proj-tab {% if p.id == active_project_id %}active{% endif %}" data-project-id="{{ p.id }}">{{ p.name }}</div>
@@ -69,35 +78,40 @@
     {% endfor %}
   </div>
 
-  <!-- Header summary -->
-  <div class="alloc-header">
+  <!-- Header: summary + controls -->
+  <div class="alloc-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
     <div class="summary-cards" id="summaryCards">
       <div class="summary-card"><h4>Total Headcount</h4><p id="sumHeadcount">0</p></div>
       <div class="summary-card"><h4>Total Hours Allocated</h4><p id="sumHours">0</p></div>
+      <div class="summary-card"><h4>Total Hours Available</h4><p id="sumAvailable">{{ hours_available }}</p></div>
       <div class="summary-card"><h4>Avg Hours / Employee</h4><p id="sumAvgHours">0</p></div>
       <div class="summary-card"><h4>Total FTE</h4><p id="sumFTE">0</p></div>
     </div>
-    <div class="controls">
-      <label>Month: <input type="month" id="monthPicker" value="{{ month_start|date:'Y-m' }}" class="form-input" style="padding:8px 10px; width:160px;"></label>
-      <button class="save-btn" id="saveAllocBtn">Save</button>
-      <a href="{% url 'projects:list' %}" class="cancel-btn">Back</a>
+
+    <div class="controls" style="display:flex;gap:8px;align-items:center;">
+      <label style="font-weight:600;font-size:13px;">Month:
+        <input type="month" id="monthPicker" value="{{ month_start|date:'Y-m' }}" class="form-input" style="padding:8px 10px; width:160px; margin-left:8px;">
+      </label>
+      <!-- Save button - explicit class & inline style to ensure appearance -->
+      <button id="saveAllocBtn" class="save-btn" type="button" title="Save monthly allocations">Save</button>
+      <a href="{% url 'projects:list' %}" class="cancel-btn" style="padding:10px 14px;border-radius:8px;border:1px solid rgba(10,30,80,0.08);background:#fff;text-decoration:none;color:#0b1320;">Back</a>
     </div>
   </div>
 
-  <!-- COEs -->
-  <div id="coesContainer">
+  <!-- COE blocks -->
+  <div id="coesContainer" style="margin-top:12px;">
     {% if coes %}
       {% for coe in coes %}
         <div class="coe-block" data-coe-id="{{ coe.id }}">
           <div class="coe-title">
-            <div style="display:flex;align-items:center;gap:12px;">
+            <div style="display:flex;gap:12px;align-items:center;">
               <div style="font-size:16px;font-weight:800">{{ coe.name }}</div>
               <div class="muted" style="font-size:13px;">Domains: {% if domains_map|get:coe.id %}{{ domains_map|get:coe.id|length }}{% else %}0{% endif %}</div>
             </div>
             <button class="add-row-btn" data-coe-id="{{ coe.id }}">+ Add resource</button>
           </div>
 
-          <!-- Hidden domain template -->
+          <!-- hidden template to copy domain options -->
           <select class="domain-template" data-coe-id="{{ coe.id }}" style="display:none">
             <option value="">-- Select domain --</option>
             {% for d in domains_map|get:coe.id %}
@@ -107,24 +121,40 @@
 
           <table class="alloc-table" data-coe-id="{{ coe.id }}">
             <thead>
-              <tr><th style="width:36px"></th><th>Resource (LDAP)</th><th>Domain</th><th style="width:160px">Total Hours</th><th style="width:120px">Actions</th></tr>
+              <tr>
+                <th style="width:36px;"></th>
+                <th>Resource</th>
+                <th style="width:260px">Domain</th>
+                <th style="width:200px">Total Hours</th>
+                <th style="width:120px">Actions</th>
+              </tr>
             </thead>
             <tbody>
               {% for item in allocation_map|get:coe.id %}
+                {% with cap=capacity_map|get:item.user_ldap %}
                 <tr data-item-id="{{ item.item_id }}">
                   <td></td>
-                  <td><input type="text" class="form-input ldap-picker" value="{{ item.username|default:item.user_ldap }}" data-ldap="{{ item.user_ldap }}" placeholder="Search user..." /></td>
                   <td>
-                    <select class="form-input domain-select">
+                    <input type="text" class="form-input ldap-picker" placeholder="Type 3+ chars to search" value="{{ item.username|default:item.user_ldap }}" data-ldap="{{ item.user_ldap }}" style="width:100%;">
+                  </td>
+                  <td>
+                    <select class="form-input domain-select" style="width:100%;">
                       <option value="">-- Select domain --</option>
                       {% for d in domains_map|get:coe.id %}
                         <option value="{{ d.id }}" {% if d.id == item.domain_id %}selected{% endif %}>{{ d.name }}</option>
                       {% endfor %}
                     </select>
                   </td>
-                  <td><input type="number" min="0" class="form-input hours-input" value="{{ item.total_hours }}" /></td>
-                  <td><button class="btn secondary remove-row-btn">Remove</button></td>
+                  <td>
+                    <input type="number" min="0" class="form-input hours-input" value="{{ item.total_hours }}" style="width:120px;"
+                           {% if cap and cap.remaining == 0 %}disabled{% endif %}>
+                    {% if cap %}
+                      <div class="muted">Used: {{ cap.allocated }} / Left: {{ cap.remaining }}</div>
+                    {% endif %}
+                  </td>
+                  <td><button class="remove-row-btn" type="button">Remove</button></td>
                 </tr>
+                {% endwith %}
               {% endfor %}
             </tbody>
           </table>
@@ -140,119 +170,287 @@
   </div>
 </div>
 
+<!-- shared ldap suggestions container -->
 <div id="ldapSuggestions" class="autocomplete-list" style="position:fixed; z-index:2200; display:none;"></div>
 
 {% block extra_js %}
 <script>
-// state
-const hoursAvailable = {{ hours_available|default:160 }};
+/* ----------------------------
+   Client-side behavior & validation
+   ---------------------------- */
+const hoursAvailable = Number({{ hours_available|default:160 }});
 let activeProjectId = {{ active_project_id|default:'null' }};
-const monthStart = document.getElementById('monthPicker');
 
-// tabs
-document.querySelectorAll('.proj-tab').forEach(tab=>{
-  tab.addEventListener('click',()=>{
-    const url=new URL(window.location.href);
-    url.searchParams.set('project_id',tab.dataset.projectId);
-    url.searchParams.set('month',monthStart.value);
-    window.location=url.toString();
+// Utility: get CSRF cookie
+function getCookie(name){ const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return v?v.pop():''; }
+
+// Compute summary, detect over-allocations and update UI
+function computeSummary(){
+  const rows = Array.from(document.querySelectorAll('.alloc-table tbody tr'));
+  const totals = {}; // ldap -> sum hours
+  let totalHours = 0;
+  rows.forEach(r=>{
+    const ldap = (r.querySelector('.ldap-picker')?.dataset.ldap || '').trim().toLowerCase();
+    const hrs = Number(r.querySelector('.hours-input')?.value || 0);
+    if(ldap){
+      totals[ldap] = (totals[ldap] || 0) + hrs;
+    }
+    totalHours += hrs;
   });
+
+  // apply per-row over-alloc class if user's total > hoursAvailable
+  let anyOver = false;
+  rows.forEach(r=>{
+    const ldap = (r.querySelector('.ldap-picker')?.dataset.ldap || '').trim().toLowerCase();
+    if(!ldap){
+      r.classList.remove('over-alloc');
+      return;
+    }
+    const userTotal = totals[ldap] || 0;
+    if(userTotal > hoursAvailable){
+      r.classList.add('over-alloc');
+      anyOver = true;
+    } else {
+      r.classList.remove('over-alloc');
+    }
+  });
+
+  // update header summary
+  const headcount = Object.keys(totals).filter(k=>k).length;
+  const avg = headcount ? (totalHours / headcount) : 0;
+  const fte = totalHours / hoursAvailable;
+
+  document.getElementById('sumHeadcount').innerText = headcount;
+  document.getElementById('sumHours').innerText = totalHours;
+  document.getElementById('sumAvgHours').innerText = Number(avg.toFixed(2));
+  document.getElementById('sumFTE').innerText = Number(fte.toFixed(2));
+
+  // disable Save if any over-allocations exist
+  const saveBtn = document.getElementById('saveAllocBtn');
+  if(anyOver){
+    saveBtn.setAttribute('disabled','true');
+    saveBtn.title = 'Resolve over-allocations before saving';
+  } else {
+    saveBtn.removeAttribute('disabled');
+    saveBtn.title = 'Save monthly allocations';
+  }
+}
+
+// Event delegation for remove buttons, hours input, domain changes
+const coesContainer = document.getElementById('coesContainer');
+coesContainer.addEventListener('click', function(e){
+  if(e.target && e.target.matches('.remove-row-btn')){
+    e.preventDefault();
+    const tr = e.target.closest('tr');
+    if(tr) tr.remove();
+    computeSummary();
+  }
+});
+coesContainer.addEventListener('input', function(e){
+  if(e.target && e.target.matches('.hours-input')){
+    computeSummary();
+  }
 });
 
-// add row
-function createRowHtml(coeId){
-  const tr=document.createElement('tr');
-  tr.innerHTML=`<td></td>
-    <td><input type="text" class="form-input ldap-picker" data-ldap="" placeholder="Search user..."></td>
-    <td><select class="form-input domain-select"></select></td>
-    <td><input type="number" min="0" class="form-input hours-input" value="0"></td>
-    <td><button class="btn secondary remove-row-btn">Remove</button></td>`;
-  // populate domains
-  const template=document.querySelector(`.domain-template[data-coe-id="${coeId}"]`);
-  if(template){ tr.querySelector('select').innerHTML=template.innerHTML; }
-  tr.querySelector('.remove-row-btn').addEventListener('click',e=>{e.preventDefault();tr.remove();computeSummary();});
-  wireLdapPicker(tr.querySelector('.ldap-picker'));
-  tr.querySelector('.hours-input').addEventListener('input',computeSummary);
-  return tr;
-}
+// Add-row behavior
 document.querySelectorAll('.add-row-btn').forEach(btn=>{
-  btn.addEventListener('click',e=>{
+  btn.addEventListener('click', function(e){
     e.preventDefault();
-    const tbody=document.querySelector(`.alloc-table[data-coe-id="${btn.dataset.coeId}"] tbody`);
-    tbody.appendChild(createRowHtml(btn.dataset.coeId));
+    const coeId = this.dataset.coeId;
+    const tbody = document.querySelector('.alloc-table[data-coe-id="'+coeId+'"] tbody');
+    if(!tbody) return;
+
+    // create row
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td></td>
+      <td><input type="text" class="form-input ldap-picker" placeholder="Type 3+ chars to search" data-ldap="" style="width:100%"></td>
+      <td>
+        <select class="form-input domain-select" style="width:100%"></select>
+      </td>
+      <td>
+        <input type="number" min="0" class="form-input hours-input" value="0" style="width:120px">
+        <div class="muted" style="display:none"></div>
+      </td>
+      <td><button class="remove-row-btn" type="button">Remove</button></td>
+    `;
+    // populate domain select from template
+    const domainTemplate = document.querySelector('.domain-template[data-coe-id="'+coeId+'"]');
+    if(domainTemplate){
+      tr.querySelector('select.domain-select').innerHTML = domainTemplate.innerHTML;
+    } else {
+      tr.querySelector('select.domain-select').innerHTML = '<option value="">-- Select domain --</option>';
+    }
+
+    tbody.appendChild(tr);
+    // wire ldap picker for new input
+    wireLdapPicker(tr.querySelector('.ldap-picker'));
+    // compute summary when hours input changes
+    tr.querySelector('.hours-input').addEventListener('input', computeSummary);
     computeSummary();
   });
 });
 
-// summary
-function computeSummary(){
-  let total=0;const people=new Set();
-  document.querySelectorAll('.alloc-table tbody tr').forEach(r=>{
-    const ldap=(r.querySelector('.ldap-picker')?.dataset.ldap||'').trim();
-    const hrs=Number(r.querySelector('.hours-input')?.value||0);
-    if(ldap)people.add(ldap);
-    total+=hrs;
-  });
-  const head=people.size,avg=head?(total/head).toFixed(2):0,fte=(total/hoursAvailable).toFixed(2);
-  document.getElementById('sumHeadcount').innerText=head;
-  document.getElementById('sumHours').innerText=total;
-  document.getElementById('sumAvgHours').innerText=avg;
-  document.getElementById('sumFTE').innerText=fte;
-}
-computeSummary();
+// --- LDAP autocomplete (shared) ---
+const ldapSuggestions = document.getElementById('ldapSuggestions');
+let ldapActiveInput = null;
 
-// LDAP picker
-const ldapSuggestions=document.getElementById('ldapSuggestions');
+function hideLdapSuggestions(){ ldapSuggestions.style.display='none'; ldapActiveInput = null; }
+document.addEventListener('click', function(e){
+  if(ldapSuggestions && !ldapSuggestions.contains(e.target) && !e.target.classList.contains('ldap-picker')){
+    hideLdapSuggestions();
+  }
+});
+
 function wireLdapPicker(input){
-  if(!input)return;
-  let timer;let items=[];
-  input.addEventListener('input',()=>{
-    const q=input.value.trim();input.dataset.ldap='';
-    if(q.length<3){ldapSuggestions.style.display='none';return;}
+  if(!input) return;
+  let timer = null;
+  input.addEventListener('input', function(){
+    const q = input.value.trim();
+    input.dataset.ldap = ''; // clear until selected
+    if(q.length < 3){
+      hideLdapSuggestions();
+      return;
+    }
     clearTimeout(timer);
-    timer=setTimeout(()=>{
-      fetch(`/projects/ldap-search/?q=${encodeURIComponent(q)}`).then(r=>r.json()).then(data=>{
-        items=data.results||[];ldapSuggestions.innerHTML='';
-        if(!items.length){ldapSuggestions.style.display='none';return;}
-        items.forEach(it=>{
-          const d=document.createElement('div');d.className='autocomplete-item';
-          d.innerHTML=`<div class="a-title">${it.cn||it.sAMAccountName}</div><div class="a-sub">${it.mail||''}</div>`;
-          d.addEventListener('click',()=>{input.value=it.cn||it.sAMAccountName;input.dataset.ldap=it.sAMAccountName||it.mail||it.cn;ldapSuggestions.style.display='none';computeSummary();});
-          ldapSuggestions.appendChild(d);
+    timer = setTimeout(()=>{
+      fetch(`/projects/ldap-search/?q=${encodeURIComponent(q)}`, { credentials:'same-origin' })
+        .then(resp => resp.json())
+        .then(data => {
+          const items = data.results || [];
+          ldapSuggestions.innerHTML = '';
+          if(!items.length){ hideLdapSuggestions(); return; }
+          items.forEach(it => {
+            const div = document.createElement('div');
+            div.className = 'autocomplete-item';
+            // show Name <email>
+            const displayName = (it.cn || it.sAMAccountName || '').trim();
+            const displayEmail = (it.mail || '').trim();
+            div.innerHTML = `<div style="font-weight:700">${escapeHtml(displayName)} ${displayEmail ? ('<' + escapeHtml(displayEmail) + '>') : ''}</div>`;
+            div.addEventListener('click', function(){
+              // set input visible text and hidden ldap dataset
+              input.value = displayName + (displayEmail ? (' <' + displayEmail + '>') : '');
+              input.dataset.ldap = (it.sAMAccountName || it.mail || it.cn || '').trim();
+              hideLdapSuggestions();
+              computeSummary();
+            });
+            ldapSuggestions.appendChild(div);
+          });
+          // position suggestions
+          const rect = input.getBoundingClientRect();
+          ldapSuggestions.style.left = rect.left + 'px';
+          ldapSuggestions.style.top = (rect.bottom + window.scrollY) + 'px';
+          ldapSuggestions.style.width = Math.max(320, rect.width) + 'px';
+          ldapSuggestions.style.display = 'block';
+          ldapActiveInput = input;
+        }).catch(err=>{
+          console.error('LDAP search error', err);
+          hideLdapSuggestions();
         });
-        const rect=input.getBoundingClientRect();
-        ldapSuggestions.style.left=rect.left+'px';ldapSuggestions.style.top=(rect.bottom+window.scrollY)+'px';ldapSuggestions.style.width=Math.max(280,rect.width)+'px';
-        ldapSuggestions.style.display='block';
-      });
-    },200);
+    }, 180);
   });
-}
-document.querySelectorAll('.ldap-picker').forEach(inp=>wireLdapPicker(inp));
 
-// save
-document.getElementById('saveAllocBtn').addEventListener('click',()=>{
-  const items=[];
+  // keyboard navigation
+  input.addEventListener('keydown', function(e){
+    if(ldapSuggestions.style.display === 'none') return;
+    const items = Array.from(ldapSuggestions.querySelectorAll('.autocomplete-item'));
+    if(!items.length) return;
+    const active = ldapSuggestions.querySelector('.active');
+    let idx = items.indexOf(active);
+    if(e.key === 'ArrowDown'){ e.preventDefault(); idx = Math.min(items.length-1, idx+1); highlightItem(items, idx); }
+    else if(e.key === 'ArrowUp'){ e.preventDefault(); idx = Math.max(0, idx-1); highlightItem(items, idx); }
+    else if(e.key === 'Enter'){ e.preventDefault(); if(idx >= 0) items[idx].click(); }
+    else if(e.key === 'Escape'){ hideLdapSuggestions(); }
+  });
+
+  function highlightItem(list, idx){
+    list.forEach(i => i.classList.remove('active'));
+    if(idx >= 0 && list[idx]) {
+      list[idx].classList.add('active');
+      list[idx].scrollIntoView({ block:'nearest' });
+    }
+  }
+}
+
+// wire existing pickers on page load
+document.querySelectorAll('.ldap-picker').forEach(wireLdapPicker);
+
+// ---------------- Save allocations ----------------
+document.getElementById('saveAllocBtn').addEventListener('click', function(e){
+  e.preventDefault();
+  // check over allocations before posting
+  const overExists = document.querySelectorAll('.over-alloc').length > 0;
+  if(overExists){
+    alert('There are over-allocated resources (highlighted in red). Resolve before saving.');
+    return;
+  }
+  // gather items
+  const payloadItems = [];
   document.querySelectorAll('.coe-block').forEach(cb=>{
-    cb.querySelectorAll('tbody tr').forEach(r=>{
-      const ldap=(r.querySelector('.ldap-picker')?.dataset.ldap||'').trim();
-      if(!ldap)return;
-      items.push({
-        coe_id:Number(cb.dataset.coeId),
-        domain_id:r.querySelector('.domain-select')?.value||null,
-        user_ldap:ldap,
-        total_hours:Number(r.querySelector('.hours-input')?.value||0)
+    const coeId = Number(cb.dataset.coeId);
+    cb.querySelectorAll('tbody tr').forEach(tr=>{
+      const ldap = (tr.querySelector('.ldap-picker')?.dataset.ldap || '').trim();
+      if(!ldap) return; // skip rows without selected ldap
+      const domainVal = tr.querySelector('.domain-select')?.value || null;
+      const hrs = Number(tr.querySelector('.hours-input')?.value || 0);
+      payloadItems.push({
+        coe_id: coeId,
+        domain_id: domainVal ? Number(domainVal) : null,
+        user_ldap: ldap,
+        total_hours: hrs
       });
     });
   });
-  const payload={project_id:activeProjectId,month_start:(document.getElementById('monthPicker').value||'')+'-01',items:items};
-  fetch("{% url 'projects:save_monthly_allocations' %}",{
-    method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},body:JSON.stringify(payload)
-  }).then(r=>r.json()).then(resp=>{
-    if(resp.ok){alert('Allocations saved.');window.location.reload();}
-    else{alert('Save failed: '+(resp.error||JSON.stringify(resp)));}
-  });
+
+  const payload = {
+    project_id: activeProjectId,
+    month_start: (document.getElementById('monthPicker').value || '') + '-01',
+    items: payloadItems
+  };
+
+  // basic validation
+  if(!activeProjectId){
+    alert('No project selected.');
+    return;
+  }
+
+  // send
+  fetch("{% url 'projects:save_monthly_allocations' %}", {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': getCookie('csrftoken')
+    },
+    body: JSON.stringify(payload)
+  }).then(r => r.json())
+    .then(resp => {
+      if(resp && resp.ok){
+        // success feedback
+        const s = document.getElementById('saveAllocBtn');
+        s.innerText = 'Saved';
+        setTimeout(()=>{ s.innerText = 'Save'; window.location.reload(); }, 800);
+      } else {
+        alert('Save failed: ' + (resp && resp.error ? resp.error : JSON.stringify(resp)));
+      }
+    })
+    .catch(err => {
+      console.error('Save error', err);
+      alert('Save failed: ' + err);
+    });
 });
-function getCookie(name){const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');return v?v.pop():'';}
+
+/* compute summary on page load and whenever relevant */
+document.addEventListener('DOMContentLoaded', function(){
+  // wire hours inputs for existing rows to recompute
+  document.querySelectorAll('.hours-input').forEach(el=>{
+    el.addEventListener('input', computeSummary);
+  });
+  // wire ldap pickers already done above
+  computeSummary();
+});
+/* helper to escape html when rendering suggestion text */
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]; }); }
 </script>
 {% endblock %}
 {% endblock %}
