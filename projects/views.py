@@ -865,9 +865,8 @@ def allocations_monthly(request):
                 allocation_map.setdefault(r['coe_id'], []).append(r)
 
     # hours available (global)
-    from decimal import Decimal
-
-    hours_available = Decimal(str(HOURS_AVAILABLE_PER_MONTH))
+    # hours available (global) - pass plain float so template/JS gets a numeric value
+    hours_available = float(HOURS_AVAILABLE_PER_MONTH)
 
     # 🔑 capacity per user for this project + month
     capacity_map = {}
@@ -882,9 +881,11 @@ def allocations_monthly(request):
             """, [project_id_active, month_start])
             for row in cur.fetchall():
                 user_ldap, allocated = row
-                remaining = max(0, hours_available - (allocated or 0))
+                # normalize DB value to float (allocated may come back as Decimal or int)
+                allocated_val = float(allocated) if allocated is not None else 0.0
+                remaining = max(0.0, hours_available - allocated_val)
                 capacity_map[user_ldap] = {
-                    "allocated": allocated or 0,
+                    "allocated": allocated_val,
                     "remaining": remaining,
                     "capacity": hours_available
                 }
