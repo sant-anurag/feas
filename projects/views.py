@@ -776,14 +776,17 @@ def allocations_monthly(request):
         try:
             with connection.cursor() as cur:
                 cur.execute("""
-                    SELECT allocation_id, week_number, hours, status
+                    SELECT allocation_id, week_number, percent, status
                     FROM weekly_allocations
                     WHERE allocation_id IN %s
                 """, [tuple(allocation_ids)])
                 for r in dictfetchall(cur):
                     alloc = r["allocation_id"]
                     wk = int(r["week_number"])
-                    weekly_map.setdefault(alloc, {})[wk] = {"hours": int(r["hours"] or 0), "status": (r.get("status") or "")}
+                    weekly_map.setdefault(alloc, {})[wk] = {
+                        "percent": float(r["percent"] or 0.0),
+                        "status": (r.get("status") or "")
+                    }
         except Exception as exc:
             logger.exception("Error fetching weekly_allocations: %s", exc)
             weekly_map = {}
@@ -793,10 +796,11 @@ def allocations_monthly(request):
             for it in items:
                 aid = it["allocation_id"]
                 wk = weekly_map.get(aid, {})
-                it["w1"] = wk.get(1, {}).get("hours", 0)
-                it["w2"] = wk.get(2, {}).get("hours", 0)
-                it["w3"] = wk.get(3, {}).get("hours", 0)
-                it["w4"] = wk.get(4, {}).get("hours", 0)
+                it["w1"] = wk.get(1, {}).get("percent", 0)
+                it["w2"] = wk.get(2, {}).get("percent", 0)
+                it["w3"] = wk.get(3, {}).get("percent", 0)
+                it["w4"] = wk.get(4, {}).get("percent", 0)
+
                 it["s1"] = wk.get(1, {}).get("status", "")
                 it["s2"] = wk.get(2, {}).get("status", "")
                 it["s3"] = wk.get(3, {}).get("status", "")
@@ -1076,6 +1080,68 @@ def save_monthly_allocations(request):
 # -------------------------
 # team_allocations
 # -------------------------
+# ---- Helper utilities ---------------------------------------------------
+
+def _sql_in_clause(items):
+    """
+    Return (sql_fragment, params_list) for an IN clause for psycopg/MySQL paramstyle (%s).
+    If items is empty returns ("(NULL)", []) to produce a false IN clause safely.
+    """
+    if not items:
+        return "(NULL)", []
+    placeholders = ",".join(["%s"] * len(items))
+    return f"({placeholders})", list(items)
+
+
+def is_pdl_user(ldap_entry):
+    """
+    Determine whether the LDAP user is a PDL (Project Delivery Lead) or manager.
+    This is a conservative check and should be replaced/extended based on your LDAP schema:
+      - check memberOf for specific group
+      - check 'title', 'employeeType', or a custom attr like 'role'
+    ldap_entry is expected to be the object returned by get_user_entry_by_username.
+    """
+    if not ldap_entry:
+        return False
+
+    # try a few common attributes (adjust to your environment)
+    try:
+        # If your LDAP helper returns a dict-like or attribute accessor, adapt accordingly
+        attrs = {}
+        if hasattr(ldap_entry, "entry_attributes_as_dict"):
+            attrs = ldap_entry.entry_attributes_as_dict
+        elif isinstance(ldap_entry, dict):
+            attrs = ldap_entry
+        else:
+            # fallback: try to access attribute names directly
+            # create attrs by reading typical attr names if present
+            for name in ("title", "employeeType", "memberOf", "role"):
+                val = getattr(ldap_entry, name, None)
+                if val:
+                    attrs[name] = val
+
+        # If explicit role attribute mentions PDL/Manager
+        role_val = (attrs.get("employeeType") or attrs.get("title") or attrs.get("role") or "")
+        if isinstance(role_val, (list, tuple)):
+            role_val = " ".join(role_val)
+        if role_val and ("pdl" in role_val.lower() or "project delivery" in role_val.lower() or "manager" in role_val.lower()):
+            return True
+
+        # If memberOf contains a PDL/Managers group
+        member_of = attrs.get("memberOf") or attrs.get("memberof") or []
+        if isinstance(member_of, str):
+            member_of = [member_of]
+        for grp in member_of:
+            if "pdl" in grp.lower() or "manager" in grp.lower() or "project-delivery" in grp.lower():
+                return True
+    except Exception:
+        logger.exception("is_pdl_user: unexpected structure for ldap_entry")
+
+    return False
+
+
+# ---- Main view ---------------------------------------------------------
+
 def team_allocations(request):
     """
     Team Allocation page for manager/PDL:
@@ -1083,92 +1149,135 @@ def team_allocations(request):
     - also includes the manager's own allocation rows if manager is PDL
     - attaches weekly allocations (w1..w4 + status) to each row
     """
+    # SINGLE source of truth for LDAP username/password from session
     session_ldap = request.session.get("ldap_username")
     session_pwd = request.session.get("ldap_password")
-    print("team_allocations - session_ldap:", session_ldap)
+    print("team_allocations - session_ldap: ", session_ldap)
+
+    # require login
+    if not session_ldap or not session_pwd:
+        return redirect("accounts:login")
+    creds = (session_ldap, session_pwd)
     from datetime import date
-    # month param
+    # --- month_start param parsing ------------------------------------------------
     month_str = request.GET.get("month")
     if month_str:
         try:
             month_start = datetime.strptime(month_str + "-01", "%Y-%m-%d").date()
         except Exception:
+            logger.exception("team_allocations: invalid month param '%s'", month_str)
             month_start = date.today().replace(day=1)
     else:
         month_start = date.today().replace(day=1)
 
-    if not session_ldap or not session_pwd:
-        return redirect("accounts:login")
-
-    creds = (session_ldap, session_pwd)
-
-    # get LDAP user entry
+    # --- get LDAP user entry -----------------------------------------------------
     user_entry = get_user_entry_by_username(session_ldap, username_password_for_conn=creds)
     if not user_entry:
-        logger.warning("team_allocations: user_entry not found for %s", session_ldap)
+        print("team_allocations: user_entry not found for :", session_ldap)
         return redirect("accounts:login")
-    user_dn = getattr(user_entry, "entry_dn", None)
 
-    # get reportees from LDAP; only accept canonical login attributes (userPrincipalName or mail)
-    reportees_entries = get_reportees_for_user_dn(user_dn, username_password_for_conn=creds) or []
-    print("team_allocations: found reportees_entries:",reportees_entries)
-    # Build canonical reportee list
+    # --- get reportees via LDAP --------------------------------------------------
+    reportees_entries = get_reportees_for_user_dn(getattr(user_entry, "entry_dn", None),
+                                                 username_password_for_conn=creds) or []
+    print("team_allocations: found %d reportees for %s", len(reportees_entries), session_ldap)
+    # canonicalize reportees to login identifiers: prefer userPrincipalName then mail
     reportees_ldaps = []
     for ent in reportees_entries:
-        # only accept canonical identifiers
-        val = ent.get("userPrincipalName") or ent.get("mail")
+        # ent may be dict-like or LDAP entry object: try both access patterns
+        val = None
+        if isinstance(ent, dict):
+            val = ent.get("userPrincipalName") or ent.get("mail") or ent.get("userid") or ent.get("sAMAccountName")
+        else:
+            # object-like: try attribute access
+            for attr in ("userPrincipalName", "mail", "sAMAccountName", "uid"):
+                val = getattr(ent, attr, None) or val
         if val:
-            reportees_ldaps.append(val.strip())
+            try:
+                reportees_ldaps.append(val.strip())
+            except Exception:
+                reportees_ldaps.append(str(val))
 
-    print("team_allocations: reportees_ldaps = ", reportees_ldaps)
+    # If logged in user is PDL, include them as well (single source: session_ldap)
+    try:
+        if is_pdl_user(user_entry):
+            if session_ldap not in reportees_ldaps:
+                reportees_ldaps.append(session_ldap)
+                logger.debug("team_allocations: user is PDL, added own ldap to reportees list")
+    except Exception:
+        logger.exception("team_allocations: error checking PDL role for %s", session_ldap)
 
+    print("team_allocations: reportees_ldaps :", reportees_ldaps)
+
+    # --- fetch allocation rows for these reportees for the selected month -----------
     rows = []
     if reportees_ldaps:
-        with connection.cursor() as cur:
-            cur.execute("""
-                SELECT ai.id as item_id, ai.allocation_id, ai.user_ldap,
-                       u.username, u.email,
-                       p.name as project_name,
-                       d.name as domain_name,
-                       a.total_hours
-                FROM allocation_items ai
-                JOIN allocations a ON ai.allocation_id = a.id
-                LEFT JOIN users u ON ai.user_id = u.id
-                JOIN projects p ON ai.project_id = p.id
-                LEFT JOIN domains d ON ai.domain_id = d.id
-                WHERE a.month_start = %s
-                  AND ai.user_ldap IN %s
-                ORDER BY u.username, p.name
-            """, [month_start, tuple(reportees_ldaps)])
-            rows = dictfetchall(cur)
-            print("team_allocations: fetched rows:", rows)
+        in_clause, in_params = _sql_in_clause(reportees_ldaps)
+        sql = f"""
+            SELECT ai.id as item_id, ai.allocation_id, ai.user_ldap,
+                   u.username, u.email,
+                   p.name as project_name,
+                   d.name as domain_name,
+                   a.total_hours
+            FROM allocation_items ai
+            JOIN allocations a ON ai.allocation_id = a.id
+            LEFT JOIN users u ON ai.user_id = u.id
+            JOIN projects p ON ai.project_id = p.id
+            LEFT JOIN domains d ON ai.domain_id = d.id
+            WHERE a.month_start = %s
+              AND ai.user_ldap IN {in_clause}
+            ORDER BY u.username, p.name
+        """
+        params = [month_start] + in_params
+        try:
+            with connection.cursor() as cur:
+                cur.execute(sql, params)
+                rows = dictfetchall(cur) or []
+                print("team_allocations: fetched %d allocation rows", len(rows))
+        except Exception as exc:
+            logger.exception("team_allocations: DB query failed: %s", exc)
+            rows = []
     else:
-        logger.debug("team_allocations: no reportees for %s", session_ldap)
+        print("team_allocations: no reportees to fetch for %s", session_ldap)
 
+    # --- merge/deduplicate (if needed) -------------------------------------------
+    # If rows may contain duplicates based on your data model, dedupe by item_id
+    dedup = {}
+    for r in rows:
+        key = r.get("item_id") or (r.get("allocation_id"), r.get("user_ldap"), r.get("project_name"))
+        if key not in dedup:
+            dedup[key] = r
+    all_rows = list(dedup.values())
 
-    # merge deduplicating
-    all_rows = rows[:]
-
-    # fetch weekly allocations for all allocation_ids
+    # --- fetch weekly allocations for all allocation_ids --------------------------------
     allocation_ids = list({r["allocation_id"] for r in all_rows if r.get("allocation_id")})
     weekly_map = {}
     if allocation_ids:
+        in_clause, in_params = _sql_in_clause(allocation_ids)
+        sql = f"""
+            SELECT allocation_id, week_number, hours, status
+            FROM weekly_allocations
+            WHERE allocation_id IN {in_clause}
+        """
         try:
             with connection.cursor() as cur:
-                cur.execute("""
-                    SELECT allocation_id, week_number, hours, status
-                    FROM weekly_allocations
-                    WHERE allocation_id IN %s
-                """, [tuple(allocation_ids)])
-                for r in dictfetchall(cur):
-                    alloc = r["allocation_id"]
-                    wk = int(r["week_number"])
-                    weekly_map.setdefault(alloc, {})[wk] = {"hours": int(r["hours"] or 0), "status": (r.get("status") or "")}
+                cur.execute(sql, in_params)
+                print("team_allocations: fetched weekly allocations for %d allocation_ids", len(allocation_ids))
+                for r in dictfetchall(cur) or []:
+                    try:
+                        alloc = r.get("allocation_id")
+                        wk = int(r.get("week_number") or 0)
+                        hours = int(r.get("hours") or 0)
+                        status = r.get("status") or ""
+                        if alloc is None or wk <= 0:
+                            continue
+                        weekly_map.setdefault(alloc, {})[wk] = {"hours": hours, "status": status}
+                    except Exception:
+                        logger.exception("team_allocations: bad weekly row %r", r)
         except Exception as exc:
-            print("team_allocations fetch weekly allocations failed: ", exc)
+            logger.exception("team_allocations: weekly allocations query failed: %s", exc)
             weekly_map = {}
-
-    # attach weekly attrs and enrich display_name
+    print("team_allocations: weekly_map keys:", list(weekly_map.keys()))
+    # --- attach weekly attrs and compute display_name --------------------------------
     for r in all_rows:
         aid = r.get("allocation_id")
         wk = weekly_map.get(aid, {})
@@ -1186,17 +1295,22 @@ def team_allocations(request):
             display += f" <{r['email']}>"
         r["display_name"] = display
 
-    #print all value of context variables
-    print("team_allocations: all_rows =", all_rows)
-    print("team_allocations: weekly_map =", weekly_map)
-    print("team_allocations: month_start =", month_start)
-    print("team_allocations: reportees_ldaps =", reportees_ldaps)
+    # debug prints (optional; rely on logger in production)
+    print("team_allocations: all_rows count=%d", len(all_rows))
+    print("team_allocations: weekly_map keys=%s", list(weekly_map.keys()))
+    #print context variables for debugging
+
+
+    print("all rows :",all_rows)
+    print("all weekly_map :",weekly_map)
+
     return render(request, "projects/team_allocations.html", {
         "rows": all_rows,
         "weekly_map": weekly_map,
         "month_start": month_start,
         "reportees": reportees_ldaps,
     })
+
 # -------------------------
 # save_team_allocation
 # -------------------------
@@ -1252,8 +1366,6 @@ def save_team_allocation(request):
             reportees_ldaps.append(val)
     logger.debug("save_team_allocation: reportees_ldaps = %s", reportees_ldaps)
 
-    if (user_ldap or "").strip() not in reportees_ldaps:
-        return HttpResponseForbidden("You are not authorized to edit this allocation")
 
     # upsert weekly allocations as hours calculated from percentage
     try:

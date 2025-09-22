@@ -65,10 +65,18 @@
                 <td>{{ r.project_name }}</td>
                 <td>{{ r.domain_name }}</td>
                 <td>{{ r.total_hours }}</td>
-                <td><input class="week-input" type="number" min="0" max="100" value="{{ w|dict_get:1|default:0 }}" data-week="1"></td>
-                <td><input class="week-input" type="number" min="0" max="100" value="{{ w|dict_get:2|default:0 }}" data-week="2"></td>
-                <td><input class="week-input" type="number" min="0" max="100" value="{{ w|dict_get:3|default:0 }}" data-week="3"></td>
-                <td><input class="week-input" type="number" min="0" max="100" value="{{ w|dict_get:4|default:0 }}" data-week="4"></td>
+                <td><input class="week-input" type="number" min="0" max="100"
+                             value="{{ w|dict_get:1|dict_get:'hours'|default:0 }}"
+                             data-week="1"></td>
+                  <td><input class="week-input" type="number" min="0" max="100"
+                             value="{{ w|dict_get:2|dict_get:'hours'|default:0 }}"
+                             data-week="2"></td>
+                  <td><input class="week-input" type="number" min="0" max="100"
+                             value="{{ w|dict_get:3|dict_get:'hours'|default:0 }}"
+                             data-week="3"></td>
+                  <td><input class="week-input" type="number" min="0" max="100"
+                             value="{{ w|dict_get:4|dict_get:'hours'|default:0 }}"
+                             data-week="4"></td>
                 <td class="actions">
                   <button class="btn btn-save" type="button">Save</button>
                   <button class="btn btn-reset" type="button">Reset</button>
