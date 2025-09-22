@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% load static %}
+{% load dict_get %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<style>
+.container { max-width:1200px; margin:18px auto; }
+.resource-block { background:#fff; border-radius:10px; padding:14px; margin-bottom:18px; box-shadow:0 6px 18px rgba(2,6,23,0.04); }
+.resource-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.resource-title { font-weight:800; font-size:16px; color:#0b2447; }
+.small-muted { color:#6b7280; font-size:13px; }
+.team-table { width:100%; border-collapse:collapse; }
+.team-table th, .team-table td { padding:10px 12px; border-bottom:1px solid #eef2f7; text-align:left; vertical-align:middle; }
+.team-table thead th { background:#f8fafc; font-weight:700; color:#374151; }
+.week-input { width:80px; padding:6px 8px; border-radius:6px; border:1px solid #e6eaf0; }
+.actions { display:flex; gap:8px; align-items:center; }
+.btn { padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:700; }
+.btn-save { background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; border:none; }
+.btn-reset { background:#fff; border:1px solid rgba(10,30,80,0.08); color:#0b1320; }
+.muted { color:#6b7280; font-size:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+  <h2 style="margin-bottom:14px;">Team Allocation — {{ month_start|date:"F Y" }}</h2>
+
+  {% if not rows %}
+    <div class="panel" style="padding:18px;border-radius:10px;background:#fff;">
+      No allocations found for your reportees for this month.
+    </div>
+  {% else %}
+    {# Group rows by user_ldap (resource) #}
+    {% regroup rows by user_ldap as resources %}
+    {% for res in resources %}
+      <div class="resource-block">
+        <div class="resource-header">
+          <div>
+            <div class="resource-title">
+              {{ res.grouper }} — {% if res.list.0.display_name %}{{ res.list.0.display_name }}{% else %}{{ res.list.0.username }}{% endif %}
+            </div>
+            <div class="small-muted">Reportee</div>
+          </div>
+          <div class="small-muted">Tip: enter weekly % values. Save per-row.</div>
+        </div>
+
+        <table class="team-table">
+          <thead>
+            <tr>
+              <th style="width:260px">Project</th>
+              <th style="width:180px">Domain</th>
+              <th style="width:120px">Allocated Hrs</th>
+              <th style="width:100px">Week 1 %</th>
+              <th style="width:100px">Week 2 %</th>
+              <th style="width:100px">Week 3 %</th>
+              <th style="width:100px">Week 4 %</th>
+              <th style="width:160px">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in res.list %}
+              {% with w=weekly_map|dict_get:r.allocation_id %}
+              <tr data-allocation="{{ r.allocation_id }}">
+                <td>{{ r.project_name }}</td>
+                <td>{{ r.domain_name }}</td>
+                <td>{{ r.total_hours }}</td>
+                <td><input class="week-input" type="number" min="0" max="100" value="{{ w|dict_get:1|default:0 }}" data-week="1"></td>
+                <td><input class="week-input" type="number" min="0" max="100" value="{{ w|dict_get:2|default:0 }}" data-week="2"></td>
+                <td><input class="week-input" type="number" min="0" max="100" value="{{ w|dict_get:3|default:0 }}" data-week="3"></td>
+                <td><input class="week-input" type="number" min="0" max="100" value="{{ w|dict_get:4|default:0 }}" data-week="4"></td>
+                <td class="actions">
+                  <button class="btn btn-save" type="button">Save</button>
+                  <button class="btn btn-reset" type="button">Reset</button>
+                </td>
+              </tr>
+              {% endwith %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function getCookie(name){ const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return v?v.pop():''; }
+
+document.querySelectorAll('.btn-save').forEach(btn=>{
+  btn.addEventListener('click', function(e){
+    const tr = this.closest('tr');
+    const allocation_id = tr.dataset.allocation;
+    const weekly = {};
+    tr.querySelectorAll('.week-input').forEach(inp=>{
+      weekly[inp.dataset.week] = Number(inp.value || 0);
+    });
+
+    // optional: validate total percentage
+    let totalPct = 0;
+    Object.values(weekly).forEach(v=> totalPct += v);
+    if(totalPct > 100){
+      if(!confirm("Total % > 100. Continue anyway?")) return;
+    }
+
+    fetch("{% url 'projects:save_team_allocation' %}", {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify({allocation_id: Number(allocation_id), weekly: weekly})
+    }).then(r=>r.json()).then(data=>{
+      if(data.ok) alert("Saved successfully!");
+      else alert("Error: " + (data.error || JSON.stringify(data)));
+    }).catch(err=>{
+      alert("Save failed: " + err);
+    });
+  });
+});
+
+document.querySelectorAll('.btn-reset').forEach(btn=>{
+  btn.addEventListener('click', function(e){
+    location.reload();
+  });
+});
+</script>
+{% endblock %}

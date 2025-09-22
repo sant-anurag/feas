@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<style>
+.container { max-width:1200px; margin:18px auto; }
+.panel { background:#fff; border-radius:10px; padding:18px; box-shadow:0 8px 20px rgba(2,6,23,0.04); }
+.project-block { margin-bottom:18px; border-radius:8px; background:#fff; padding:14px; border:1px solid #f1f5f9; }
+.project-title { font-weight:800; margin-bottom:10px; color:#0b2447; }
+.alloc-table { width:100%; border-collapse:collapse; }
+.alloc-table th, .alloc-table td { padding:10px 12px; border-bottom:1px solid #eef2f7; vertical-align:middle; text-align:left; }
+.alloc-table thead th { background:#fafafa; font-weight:800; }
+.week-input { width:100px; padding:8px; border-radius:6px; border:1px solid #e6eaf0; }
+.btn { padding:8px 12px; border-radius:8px; font-weight:800; cursor:pointer; }
+.btn-save { background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; border:none; }
+.btn-reset { background:#fff; border:1px solid rgba(10,30,80,0.08); color:#0b1320; }
+.icon-btn { border:none; background:transparent; font-size:18px; cursor:pointer; margin-left:8px; }
+.status-accepted { background: rgba(16,185,129,0.08); border-radius:6px; padding:6px; color:#065f46; }
+.status-rejected { background: rgba(239,68,68,0.06); border-radius:6px; padding:6px; color:#991b1b; }
+.small-muted { color:#6b7280; font-size:13px; }
+.right { text-align:right; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="panel">
+    <h2>My Allocations — {{ month_start|date:"F Y" }}</h2>
+    <p class="small-muted">Your allocations for this month. Accept or Reject weekly entries assigned by your Team Lead.</p>
+
+    {% if not rows %}
+      <div style="padding:18px;border-radius:8px;background:#fff;">No allocations found for you this month.</div>
+    {% else %}
+      {# group by project #}
+      {% regroup rows by project_name as projects %}
+      {% for proj in projects %}
+        <div class="project-block">
+          <div class="project-title">{{ proj.grouper }}</div>
+          <table class="alloc-table">
+            <thead>
+              <tr>
+                <th style="width:260px">Resource</th>
+                <th style="width:160px">Domain</th>
+                <th style="width:120px">Allocated Hrs</th>
+                <th style="width:110px">Week 1</th>
+                <th style="width:110px">Week 2</th>
+                <th style="width:110px">Week 3</th>
+                <th style="width:110px">Week 4</th>
+                <th style="width:160px">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in proj.list %}
+              <tr data-allocation="{{ r.allocation_id }}">
+                <td>
+                  <div style="font-weight:700;">{{ display_name }}</div>
+                  <div class="small-muted">You</div>
+                </td>
+                <td>{{ r.domain_name }}</td>
+                <td>{{ r.total_hours }}</td>
+
+                <!-- Week 1 -->
+                <td>
+                  <div style="display:flex;align-items:center;">
+                    <input class="week-input" type="number" min="0" value="{{ r.w1_hours }}" readonly>
+                    <button class="icon-btn btn-accept" title="Accept week 1" data-week="1">✅</button>
+                    <button class="icon-btn btn-reject" title="Reject week 1" data-week="1">❌</button>
+                  </div>
+                  {% if r.w1_status == 'ACCEPTED' %}
+                    <div class="status-accepted small-muted">Accepted</div>
+                  {% elif r.w1_status == 'REJECTED' %}
+                    <div class="status-rejected small-muted">Rejected</div>
+                  {% endif %}
+                </td>
+
+                <!-- Week 2 -->
+                <td>
+                  <div style="display:flex;align-items:center;">
+                    <input class="week-input" type="number" min="0" value="{{ r.w2_hours }}" readonly>
+                    <button class="icon-btn btn-accept" title="Accept week 2" data-week="2">✅</button>
+                    <button class="icon-btn btn-reject" title="Reject week 2" data-week="2">❌</button>
+                  </div>
+                  {% if r.w2_status == 'ACCEPTED' %}
+                    <div class="status-accepted small-muted">Accepted</div>
+                  {% elif r.w2_status == 'REJECTED' %}
+                    <div class="status-rejected small-muted">Rejected</div>
+                  {% endif %}
+                </td>
+
+                <!-- Week 3 -->
+                <td>
+                  <div style="display:flex;align-items:center;">
+                    <input class="week-input" type="number" min="0" value="{{ r.w3_hours }}" readonly>
+                    <button class="icon-btn btn-accept" title="Accept week 3" data-week="3">✅</button>
+                    <button class="icon-btn btn-reject" title="Reject week 3" data-week="3">❌</button>
+                  </div>
+                  {% if r.w3_status == 'ACCEPTED' %}
+                    <div class="status-accepted small-muted">Accepted</div>
+                  {% elif r.w3_status == 'REJECTED' %}
+                    <div class="status-rejected small-muted">Rejected</div>
+                  {% endif %}
+                </td>
+
+                <!-- Week 4 -->
+                <td>
+                  <div style="display:flex;align-items:center;">
+                    <input class="week-input" type="number" min="0" value="{{ r.w4_hours }}" readonly>
+                    <button class="icon-btn btn-accept" title="Accept week 4" data-week="4">✅</button>
+                    <button class="icon-btn btn-reject" title="Reject week 4" data-week="4">❌</button>
+                  </div>
+                  {% if r.w4_status == 'ACCEPTED' %}
+                    <div class="status-accepted small-muted">Accepted</div>
+                  {% elif r.w4_status == 'REJECTED' %}
+                    <div class="status-rejected small-muted">Rejected</div>
+                  {% endif %}
+                </td>
+
+                <td class="right">
+                  <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button class="btn btn-save" data-action="save">Save</button>
+                    <button class="btn btn-reset" data-action="reset">Reset</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function getCookie(name) { const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return v?v.pop():''; }
+
+// Helper: prepare updates for a row (reads local UI toggles)
+function buildRowUpdates(tr) {
+  // status_toggles will be stored in data-week-status attr on the tr (set when user clicks icons)
+  const updates = {};
+  // For weeks 1..4
+  for (let w = 1; w <= 4; w++) {
+    const weekKey = String(w);
+    const statusAttr = tr.dataset['week' + w + 'Status'] || ''; // e.g. 'ACCEPTED' or 'REJECTED' or ''
+    if (statusAttr) {
+      updates[weekKey] = statusAttr;
+    }
+  }
+  return updates;
+}
+
+// Wire accept/reject icons for entire page
+document.addEventListener('click', function(e){
+  // Accept button clicked
+  if (e.target && e.target.matches('.btn-accept')) {
+    const tr = e.target.closest('tr');
+    const week = e.target.dataset.week;
+    // toggle accepted: if already accepted -> unset; else set ACCEPTED
+    const current = tr.dataset['week' + week + 'Status'] || '';
+    if (current === 'ACCEPTED') {
+      delete tr.dataset['week' + week + 'Status'];
+      // update small status display
+      const statusEl = e.target.closest('td').querySelector('.status-accepted');
+      if (statusEl) statusEl.remove();
+    } else {
+      tr.dataset['week' + week + 'Status'] = 'ACCEPTED';
+      // remove any rejected display
+      const td = e.target.closest('td');
+      const rej = td.querySelector('.status-rejected');
+      if (rej) rej.remove();
+      // add accepted display if not present
+      if (!td.querySelector('.status-accepted')) {
+        const el = document.createElement('div');
+        el.className = 'status-accepted small-muted';
+        el.innerText = 'Accepted';
+        td.appendChild(el);
+      }
+    }
+  }
+
+  // Reject button clicked
+  if (e.target && e.target.matches('.btn-reject')) {
+    const tr = e.target.closest('tr');
+    const week = e.target.dataset.week;
+    const current = tr.dataset['week' + week + 'Status'] || '';
+    if (current === 'REJECTED') {
+      delete tr.dataset['week' + week + 'Status'];
+      const statusEl = e.target.closest('td').querySelector('.status-rejected');
+      if (statusEl) statusEl.remove();
+    } else {
+      tr.dataset['week' + week + 'Status'] = 'REJECTED';
+      // remove any accepted display
+      const td = e.target.closest('td');
+      const acc = td.querySelector('.status-accepted');
+      if (acc) acc.remove();
+      if (!td.querySelector('.status-rejected')) {
+        const el = document.createElement('div');
+        el.className = 'status-rejected small-muted';
+        el.innerText = 'Rejected';
+        td.appendChild(el);
+      }
+    }
+  }
+
+  // Save button clicked (row-level)
+  if (e.target && e.target.matches('.btn-save')) {
+    const tr = e.target.closest('tr');
+    const allocationId = tr.dataset.allocation;
+    const updates = buildRowUpdates(tr);
+    if (Object.keys(updates).length === 0){
+      alert('Nothing to save for this row.');
+      return;
+    }
+    // confirm
+    if (!confirm('Save your accept/reject choices for this row?')) return;
+
+    fetch("{% url 'projects:my_allocations_update_status' %}", {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify({ allocation_id: Number(allocationId), updates: updates })
+    }).then(r => r.json()).then(resp => {
+      if (resp && resp.ok) {
+        alert('Saved');
+        // reload to reflect server-authoritative state (and ensure Managers see rejects)
+        location.reload();
+      } else {
+        alert('Save failed: ' + (resp && resp.error ? resp.error : JSON.stringify(resp)));
+      }
+    }).catch(err=>{
+      console.error(err);
+      alert('Save failed: ' + err);
+    });
+  }
+
+  // Reset button clicked -> reload current page to restore server state
+  if (e.target && e.target.matches('.btn-reset')) {
+    if (!confirm('Reset to server values?')) return;
+    location.reload();
+  }
+});
+</script>
+{% endblock %}

@@ -25,4 +25,10 @@ urlpatterns = [
     path("api/projects/", views.api_projects, name="api_projects"),
     path('allocations/monthly/', views.allocations_monthly, name='allocations_monthly'),
     path('allocations/monthly/save/', views.save_monthly_allocations, name='save_monthly_allocations'),
+    path("team-allocations/", views.team_allocations, name="team_allocations"),
+    path("team-allocations/save/", views.save_team_allocation, name="save_team_allocation"),
+    # projects/urls.py (inside urlpatterns)
+    path('my-allocations/', views.my_allocations, name='my_allocations'),
+    path('my-allocations/update-status/', views.my_allocations_update_status, name='my_allocations_update_status'),
+
 ]

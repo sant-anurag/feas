@@ -71,7 +71,7 @@ def get_user_entry_by_username(username: str, conn: Connection = None, username_
 
     conn.search(search_base=search_base, search_filter=search_filter, search_scope=SUBTREE, attributes=attributes)
     entry = conn.entries[0] if conn.entries else None
-
+    print(f"LDAP search for {username} returned: {entry}")
     if close_conn:
         conn.unbind()
     return entry
@@ -81,7 +81,7 @@ def get_reportees_for_user_dn(user_dn: str, conn: Connection = None, username_pa
     """Return list of reportees for a given manager DN."""
     close_conn = False
     reportees = []
-
+    print(f"Getting reportees for manager DN: {username_password_for_conn}")
     if conn is None:
         if username_password_for_conn:
             u, p = username_password_for_conn

@@ -107,12 +107,16 @@ document.addEventListener("DOMContentLoaded", function() {
     function select(idx){
       const it = items[idx];
       if (!it) return;
-      input.value = `${it.cn || it.sAMAccountName} (${it.mail||''})`;
-      hidden.value = it.sAMAccountName || it.mail || it.cn;
+
+      // Show CN + mail in visible text field
+      input.value = `${it.cn || it.displayName || it.sAMAccountName || ''} (${it.mail || it.userPrincipalName || ''})`;
+
+      // Save only canonical login in hidden field
+      hidden.value = it.userPrincipalName || it.mail || '';
+
       box.style.display = "none";
     }
-    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
-  }
+
 
   wireAutocomplete("pdl_picker","pdl_username","pdl_suggestions");
   wireAutocomplete("coe_leader_picker","coe_leader_username","coe_leader_suggestions");
