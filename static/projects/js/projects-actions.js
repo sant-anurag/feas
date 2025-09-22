@@ -104,18 +104,23 @@ document.addEventListener("DOMContentLoaded", function() {
         itemsEls[activeIndex].scrollIntoView({block:"nearest"});
       }
     }
-    function select(idx){
-      const it = items[idx];
-      if (!it) return;
+      function select(idx){
+          const it = items[idx];
+          if (!it) return;
 
-      // Show CN + mail in visible text field
-      input.value = `${it.cn || it.displayName || it.sAMAccountName || ''} (${it.mail || it.userPrincipalName || ''})`;
+          // Friendly text shown to the user: displayName / cn with mail/UPN in parens
+          const displayName = it.cn || it.displayName || it.sAMAccountName || '';
+          const canonicalId = it.userPrincipalName || it.mail || ''; // prefer UPN, fallback mail
 
-      // Save only canonical login in hidden field
-      hidden.value = it.userPrincipalName || it.mail || '';
+          input.value = `${displayName}${canonicalId ? ' <' + canonicalId + '>' : ''}`;
 
-      box.style.display = "none";
+          // IMPORTANT: send only the canonical LDAP login (UPN or mail) to backend
+          // This prevents samAccountName (short) from getting stored.
+          hidden.value = canonicalId;
+
+          box.style.display = "none";
     }
+
 
 
   wireAutocomplete("pdl_picker","pdl_username","pdl_suggestions");
