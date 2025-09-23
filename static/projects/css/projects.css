@@ -207,5 +207,121 @@
   .create-panel { flex-basis: 100%; }
   .actions-column { flex-basis: 100%; }
 }
+/* Modal overlay & panel */
+.modal-overlay {
+  position: fixed;
+  inset: 0; /* top:0; right:0; bottom:0; left:0 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 22, 60, 0.32);
+  z-index: 1200;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+/* Keep modal-panel centered and responsive */
+.modal-panel {
+  position: relative;
+  width: min(1100px, 98%);
+  max-height: 86vh;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(12, 22, 60, 0.12);
+  padding: 20px 24px;
+  box-sizing: border-box;
+}
+
+/* close button */
+.modal-close {
+  position: absolute;
+  top: 12px;
+  left: 12px; /* user preferred left in screenshot */
+  border: 0;
+  background: #f3f4f6;
+  color: #111827;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .12s ease;
+}
+.modal-close:hover { background: #e6e9ef; }
+
+/* modal content area scrolls independently */
+.modal-content {
+  overflow: auto;
+  max-height: calc(86vh - 8px);
+  padding-right: 8px;
+}
+
+/* Profile header: avatar + summary */
+.profile-header {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+.profile-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+  background: #eef3ff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:700;
+  color:#0b3b93;
+  font-size:24px;
+}
+.profile-title { font-size:20px; font-weight:700; margin:0; }
+.profile-sub { margin:4px 0 0; color:#475569; font-size:14px; }
+
+/* key-value list */
+.kv-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 8px 14px;
+  margin-top: 12px;
+  padding-top: 6px;
+  border-top: 1px solid #eef2ff;
+}
+.kv-label { color:#334155; font-weight:600; }
+.kv-value { color:#0f172a; }
+
+/* attributes JSON box */
+.attributes-box {
+  margin-top: 18px;
+  border: 1px solid #eef2ff;
+  border-radius: 6px;
+  padding: 12px;
+  background:#fafbfd;
+}
+.attributes-box pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 46vh; /* leave space for header */
+  overflow: auto;
+}
+
+/* make sure modal close button is visible above content */
+.modal-panel .modal-close { z-index: 5; }
+
+/* responsive tweaks */
+@media (max-width: 720px) {
+  .profile-header { grid-template-columns: 72px 1fr; gap: 12px; }
+  .profile-avatar { width:72px; height:72px; font-size:18px; }
+  .modal-panel { padding:14px; }
+}
 
 /* keep the rest of the earlier project styles intact (if any) */

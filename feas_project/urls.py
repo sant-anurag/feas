@@ -7,6 +7,8 @@ urlpatterns = [
     path('accounts/', include('accounts.urls', namespace='accounts')),
     path('', include('base.urls', namespace='dashboard')),  # landing dashboard
     path("projects/", include("projects.urls", namespace="projects")),
+path("resources/", include("resources.urls")),
+
 
 ]
 

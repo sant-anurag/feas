@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}LDAP Sync{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<style>
+  .sync-box { max-width:720px; margin: 12px auto; }
+  .progress-wrap { margin-top: 18px; }
+  .progress-bar { height: 14px; border-radius: 8px; background: #e6eefc; overflow: hidden; }
+  .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#2563eb,#1e40af); transition: width 0.35s; }
+  .sync-history { margin-top: 18px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="panel sync-box">
+  <h2>LDAP Sync</h2>
+  <p class="muted">Create/refresh a local copy of your Global LDAP directory. Admin-only operation.</p>
+
+  <div style="display:flex;gap:10px;align-items:center;margin-top:8px;">
+    <button id="startSyncBtn" class="action-btn edit">Start Full Sync</button>
+    <div id="syncStatus" style="font-weight:600;color:#0b3b93">Idle</div>
+  </div>
+
+  <div class="progress-wrap" aria-hidden="false" style="display:block;">
+    <div style="margin-top:8px;">
+      <div class="progress-bar" aria-hidden="true"><div id="progressFill" class="progress-fill"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:13px;">
+        <div id="processedText">Processed: 0</div>
+        <div id="totalText">Total: 0</div>
+      </div>
+      <div id="errorsText" style="margin-top:8px;color:#b91c1c;"></div>
+    </div>
+  </div>
+
+  <div class="sync-history">
+    <h3>Recent Jobs</h3>
+    <table class="project-table">
+      <thead><tr><th>ID</th><th>Started</th><th>Status</th><th>Processed</th><th>Errors</th><th>By</th></tr></thead>
+      <tbody>
+        {% for j in jobs %}
+        <tr>
+          <td>{{ j.id }}</td>
+          <td>{{ j.started_at }}</td>
+          <td>{{ j.status }}</td>
+          <td>{{ j.processed_count }} / {{ j.total_count }}</td>
+          <td>{{ j.errors_count }}</td>
+          <td>{{ j.started_by }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">No jobs yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'resources/js/resources.js' %}" defer></script>
+<script>
+  // init: pass endpoints
+  window._resources_config = {
+    sync_start_url: "{% url 'resources:ldap_sync_start' %}",
+    sync_progress_url: "{% url 'resources:ldap_sync_progress' %}"
+  };
+</script>
+{% endblock %}

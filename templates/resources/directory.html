@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Employee Directory{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<style>
+  .dir-top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .search-input { width:320px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="dir-top">
+    <div>
+      <h2>Employee Directory</h2>
+      <p class="muted">Local LDAP copies: <strong>{{ total_synced }}</strong></p>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input id="localSearch" class="form-input search-input" placeholder="Type first 3 chars to search" value="{{ q }}" />
+      <button id="searchBtn" class="action-btn edit">Search</button>
+    </div>
+  </div>
+
+  <table class="project-table" style="margin-top:16px;">
+    <thead><tr><th>Username</th><th>CN</th><th>Email</th><th>Title</th><th>Department</th><th>Action</th></tr></thead>
+    <tbody id="employeesBody">
+      {% for e in employees_page.object_list %}
+      <tr>
+        <td>{{ e.username }}</td>
+        <td>{{ e.cn }}</td>
+        <td>{{ e.email }}</td>
+        <td>{{ e.title }}</td>
+        <td>{{ e.department }}</td>
+        <td><button class="action-btn edit view-emp-btn" data-id="{{ e.id }}">View</button></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6">No employees found</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;">
+    <div class="muted">Showing page {{ employees_page.number }} of {{ employees_page.paginator.num_pages }}</div>
+    <div>
+      {% if employees_page.has_previous %}
+        <a class="action-btn edit" href="?page={{ employees_page.previous_page_number }}{% if q %}&q={{ q }}{% endif %}">Prev</a>
+      {% endif %}
+      {% if employees_page.has_next %}
+        <a class="action-btn edit" href="?page={{ employees_page.next_page_number }}{% if q %}&q={{ q }}{% endif %}">Next</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- modal -->
+<!-- modal - place near end of template (replace previous empModal block) -->
+<div id="empModal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" style="display:none;">
+  <div class="modal-panel" role="document" tabindex="-1" aria-labelledby="empModalTitle">
+    <button class="modal-close" data-close="empModal" aria-label="Close profile">✕</button>
+    <div id="empModalContent" class="modal-content"></div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'resources/js/resources.js' %}" defer></script>
+<script>
+  window._resources_config = {
+    local_search_url: "{% url 'resources:ldap_local_search' %}",
+    profile_url_template: "{% url 'resources:ldap_local_profile' 0 %}".replace("/0/","/{id}/")
+  };
+</script>
+{% endblock %}

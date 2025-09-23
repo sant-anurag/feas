@@ -28,16 +28,18 @@ MENU_TREE = [
         ],
     },
 
-    {
-        "key": "resources",
-        "title": "Resource Management",
-        "url": "#",
-        "roles": ["ADMIN", "PDL", "COE_LEADER", "TEAM_LEAD"],
-        "submenus": [
-            {"key": "directory", "title": "Employee Directory", "url": "#", "roles": ["ADMIN","PDL","COE_LEADER","TEAM_LEAD"]},
-            {"key": "ldap_sync", "title": "Import / Sync LDAP", "url": "#", "roles": ["ADMIN"]},
-        ],
-    },
+    {"key": "resources",
+     "title": "Resource Management",
+     "url": "#",
+     "roles": ["ADMIN", "PDL", "COE_LEADER", "TEAM_LEAD"],
+     "submenus": [
+         {"key": "directory", "title": "Employee Directory", "url": reverse_lazy("resources:directory"),
+          "roles": ["ADMIN", "PDL", "COE_LEADER", "TEAM_LEAD"]},
+         {"key": "ldap_sync", "title": "Import / Sync LDAP", "url": reverse_lazy("resources:ldap_sync"),
+          "roles": ["ADMIN","PDL"]},
+     ],
+     },
+
     {
         "key": "allocations",
         "title": "Allocations",

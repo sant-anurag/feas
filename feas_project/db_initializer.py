@@ -232,7 +232,45 @@ class DatabaseInitializer:
                       FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+                """,
                 """
+               CREATE TABLE IF NOT EXISTS `ldap_directory` (
+                  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                  `username` VARCHAR(150) NOT NULL,
+                  `email` VARCHAR(254),
+                  `cn` VARCHAR(255),
+                  `givenName` VARCHAR(150),
+                  `sn` VARCHAR(150),
+                  `title` VARCHAR(255),
+                  `department` VARCHAR(255),
+                  `telephoneNumber` VARCHAR(64),
+                  `mobile` VARCHAR(64),
+                  `manager_dn` VARCHAR(512),
+                  `ldap_dn` VARCHAR(1024) NOT NULL,
+                  `ldap_dn_hash` CHAR(64) NOT NULL,
+                  `attributes_json` JSON NULL,
+                  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY `uq_ldap_directory_dn_hash` (`ldap_dn_hash`),
+                  UNIQUE KEY `uq_ldap_directory_username` (`username`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+             
+                """,
+                 """
+            CREATE TABLE IF NOT EXISTS `ldap_sync_jobs` (
+              `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+              `started_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              `finished_at` TIMESTAMP NULL,
+              `started_by` VARCHAR(255),
+              `status` VARCHAR(32) NOT NULL DEFAULT 'PENDING', -- PENDING / RUNNING / COMPLETED / FAILED
+              `total_count` INT DEFAULT 0,
+              `processed_count` INT DEFAULT 0,
+              `errors_count` INT DEFAULT 0,
+              `details` TEXT,
+              `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                            """
             ]
         )
 
