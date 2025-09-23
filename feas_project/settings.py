@@ -105,7 +105,11 @@ DB_INIT_DONE_TABLE = os.getenv("DB_INIT_DONE_TABLE", "system_settings")
 # LDAP server settings (used by check_credentials)
 LDAP_SERVER = '10.170.130.91'
 LDAP_PORT = 389
-LDAP_USER_SEARCH_BASE = 'OU=HNJ,OU=IN'
+
+# Leave user search base empty if you want the whole directory
+LDAP_USER_SEARCH_BASE = ''
+
+# Your forest/domain root
 LDAP_BASE_DN = 'DC=ls,DC=ege,DC=ds'
 LDAP_ATTRIBUTES = [
     'cn','sAMAccountName','userPrincipalName','mail','department',
