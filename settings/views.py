@@ -84,7 +84,7 @@ def _param_safe(v: Any) -> Any:
     except Exception:
         pass
 
-    # numeric types -> convert to string (driver-safe)
+    # numeric types -> return as-is for driver (int/float)
     try:
         if isinstance(v, (int, float)):
             return v
@@ -139,8 +139,10 @@ def _create_projects_table(cursor):
         `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
         `name` VARCHAR(255) NOT NULL,
         `oem_name` VARCHAR(255),
-        `pdl_user_id` BIGINT,
-        `pm_user_id` BIGINT,
+        `pdl_user_id` VARCHAR(255),
+        `pdl_name` VARCHAR(255),
+        `pm_user_id` VARCHAR(255),
+        `pm_name` VARCHAR(255),
         `start_date` DATE,
         `end_date` DATE,
         `description` TEXT,
@@ -371,24 +373,49 @@ def import_master(request):
             cursor.execute("SELECT id, name FROM projects")
             existing_projects = {row[1]: row[0] for row in cursor.fetchall()}
 
-            # Populate projects (unique by Program)
+            # Populate projects (unique by Program) and capture OEM from first occurrence
             if prog_col:
-                # gather unique program names from df
-                programs = set()
+                # gather unique program names from df and first-seen OEM
+                programs: Dict[str, Dict[str, Optional[str]]] = {}
                 for _, row in df.iterrows():
-                    orig = col_to_orig.get(prog_col)
-                    if orig:
-                        v = row.get(orig)
-                        if v is not None and (not (isinstance(v, float) and pd.isna(v))):
-                            programs.add(str(v).strip())
-                for p in sorted(programs):
+                    orig_prog = col_to_orig.get(prog_col)
+                    prog_val = row.get(orig_prog) if orig_prog else None
+                    if prog_val is None or (isinstance(prog_val, float) and pd.isna(prog_val)):
+                        # fallback: scan header names for a 'program' column
+                        for orig_h, dbc in mapping:
+                            if "program" in str(orig_h).strip().lower():
+                                prog_val = row.get(orig_h)
+                                break
+                    if prog_val is None:
+                        continue
+                    prog_name = str(prog_val).strip()
+                    if prog_name == "":
+                        continue
+                    # Buyer OEM (if present) -> use first non-empty per program
+                    oem_val = None
+                    if buyer_oem_col:
+                        orig_oem = col_to_orig.get(buyer_oem_col)
+                        if orig_oem:
+                            v = row.get(orig_oem)
+                            if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                                oem_val = str(v).strip()
+                    if prog_name not in programs:
+                        programs[prog_name] = {"oem_name": oem_val}
+                    else:
+                        # fill if previously empty
+                        if programs[prog_name].get("oem_name") in (None, "") and oem_val:
+                            programs[prog_name]["oem_name"] = oem_val
+
+                # Insert projects using captured OEM
+                for p in sorted(programs.keys()):
                     if p == "":
                         continue
                     if p in existing_projects:
                         continue
                     try:
-                        cursor.execute("INSERT INTO projects (name, oem_name) VALUES (%s,%s)", [p, None])
-                        # fetch id
+                        oem_for_p = programs[p].get("oem_name")
+                        cursor.execute("INSERT INTO projects (name, oem_name) VALUES (%s,%s)", [p, oem_for_p])
+                        # fetch id and cache
                         cursor.execute("SELECT id FROM projects WHERE name=%s LIMIT 1", [p])
                         res = cursor.fetchone()
                         if res:
@@ -531,4 +558,3 @@ def import_master(request):
         "preview_headers": preview_headers,
         "preview_rows": preview_rows,
     })
-
