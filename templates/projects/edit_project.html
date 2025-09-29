@@ -3,178 +3,171 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
 <link rel="stylesheet" href="{% static 'projects/css/projects-actions.css' %}">
-<style>
-/* reuse mapping styles */
-.mapping-card { margin-top: 20px; border-radius: 12px; background: linear-gradient(180deg,#fff,#fbfdff); border: 1px solid rgba(15,23,42,0.04); box-shadow: 0 8px 24px rgba(16,24,40,0.06); padding: 18px; }
-.mapping-grid { display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap; }
-.mapping-left { min-width:260px; width:320px; }
-.mapping-right {
-  flex: 1 1 0;
-  min-width: 0;
-}
-.project-list { list-style:none; padding:8px; margin:0; border-radius:8px; border:1px solid rgba(15,23,42,0.04); max-height:320px; overflow:auto; }
-.project-item { padding:12px; border-radius:8px; background:linear-gradient(180deg,#fff,#fff); margin-bottom:8px; display:flex; gap:10px; align-items:center; box-shadow: 0 1px 0 rgba(15,23,42,0.02); }
-.coe-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: auto; /* let columns size naturally */
-}
-
-.coe-table thead th {
-  padding: 10px 12px;
-  text-align: left;
-  font-weight: 700;
-  border-bottom: 1px solid rgba(15,23,42,0.06);
-}
-
-.coe-table tbody {
-  display: table-row-group; /* restore normal flow */
-  max-height: unset;        /* no artificial limit */
-  overflow: visible;
-}
-
-.coe-table td {
-  padding: 10px 12px;
-  vertical-align: middle;
-  word-break: break-word;   /* long names wrap nicely */
-}}
-/* filter/search & select all */
-.coe-filter { width:260px; padding:8px 10px; border-radius:8px; border:1px solid rgba(15,23,42,0.06); }
-.select-all-label { display:inline-flex; align-items:center; gap:8px; color:#374151; font-size:14px; margin-right:12px; }
-.status-toast { position:fixed; right:28px; top:96px; z-index:99999; min-width:280px; padding:12px 16px; border-radius:10px; font-weight:700; box-shadow:0 8px 24px rgba(15,23,42,0.12); }
-.mapping-header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
-.mapping-title { font-weight:700; font-size:16px; margin-bottom:6px; }
-</style>
 {% endblock %}
 
 {% block content %}
-<div style="display:flex; gap:28px; align-items:flex-start; flex-wrap:wrap;">
-  <!-- Left: Edit Project form -->
-  <div style="flex:0 0 640px; min-width:320px;">
+<div class="create-wrapper" style="display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;">
+
+  <!-- LEFT: Edit Project FORM -->
+  <div class="create-panel" style="flex:0 0 720px;min-width:320px;">
     <div class="panel" style="padding:26px;">
-      <h2>Edit Project</h2>
+      <h2 style="margin:0 0 14px 0">Edit Project</h2>
 
-      <form method="post" id="editProjectForm">
+      {% if messages %}
+        {% for m in messages %}
+          <div role="alert" style="margin-bottom:12px; font-weight:700; color: {% if m.tags == 'error' %}#b91c1c{% else %}#064e3b{% endif %};">
+            {{ m }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <form method="post" class="form-grid" id="editProjectForm" style="margin-top:6px;">
         {% csrf_token %}
+
         <label>
-          <div class="label-title">Project Name</div>
-          <input type="text" name="name" id="proj_name_input" required class="form-input" value="{{ project.name }}" />
+          <div style="font-weight:700;margin-bottom:8px">Select Project (you are the creator)</div>
+          <select name="project_choice" id="project_choice" class="form-input" required>
+            <option value="">-- Select project --</option>
+            {% for p in editable_projects %}
+              <option value="{{ p.id }}" {% if selected_project and selected_project.id == p.id %}selected{% endif %}>{{ p.name }}</option>
+            {% endfor %}
+          </select>
         </label>
 
         <label>
-          <div class="label-title">Description</div>
-          <textarea name="description" id="proj_desc_input" rows="4" class="form-input">{{ project.description }}</textarea>
+          <div style="font-weight:700;margin-bottom:8px">OEM Name</div>
+          <input type="text" name="oem_name" id="oem_name" class="form-input" value="{{ selected_project.oem_name|default_if_none:'' }}">
         </label>
 
-        <div style="display:flex; gap:12px;">
+        <div style="display:flex;gap:14px;">
           <label style="flex:1">
-            <div class="label-title">Start Date</div>
-            <input type="date" name="start_date" id="proj_start_date" class="form-input" value="{{ project.start_date|date:'Y-m-d' }}" />
+            <div style="font-weight:700;margin-bottom:8px">Start Date</div>
+            <input type="date" name="start_date" id="start_date" class="form-input" value="{{ selected_project.start_date|default_if_none:'' }}">
           </label>
           <label style="flex:1">
-            <div class="label-title">End Date</div>
-            <input type="date" name="end_date" id="proj_end_date" class="form-input" value="{{ project.end_date|date:'Y-m-d' }}" />
+            <div style="font-weight:700;margin-bottom:8px">End Date</div>
+            <input type="date" name="end_date" id="end_date" class="form-input" value="{{ selected_project.end_date|default_if_none:'' }}">
           </label>
         </div>
 
         <label>
-          <div class="label-title">Program Development Lead (PDL)</div>
-          <input id="pdl_picker" name="pdl_display" type="text" class="form-input" autocomplete="off" />
-          <input id="pdl_username" name="pdl_username" type="hidden" value="{{ project.pdl_user_id|default:'' }}" />
+          <div style="font-weight:700;margin-bottom:8px">Program Development Lead (PDL)</div>
+          <!-- visible input (search+display) -->
+          <input id="pdl_picker" name="pdl_display" type="text" class="form-input" placeholder="Type at least 3 chars to search LDAP..." autocomplete="off"
+                 value="{% if selected_project.pdl_name %}{{ selected_project.pdl_name }} ({{ selected_project.pdl_user_id|default_if_none:'' }}){% endif %}" />
+          <!-- hidden field that stores email (or canonical identifier) -->
+          <input id="pdl_user_id" name="pdl_user_id" type="hidden" value="{% if selected_project.pdl_user_id %}{{ selected_project.pdl_user_id }}{% endif %}" />
+          <!-- readonly explicit pdl name -->
+          <input id="pdl_name" type="text" readonly class="form-input" style="margin-top:8px;background:#f8fafc;" value="{{ selected_project.pdl_name|default_if_none:'' }}" />
+          <div id="pdl_suggestions" class="autocomplete-list" aria-hidden="true"></div>
         </label>
 
-        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px;">
-          <a href="{% url 'projects:list' %}" class="btn secondary">Cancel</a>
-          <button type="submit" class="btn primary">Save Changes</button>
+        <label>
+          <div style="font-weight:700;margin-bottom:8px">Project Manager (PM)</div>
+          <input id="pm_picker" name="pm_display" type="text" class="form-input" placeholder="Type at least 3 chars to search LDAP..." autocomplete="off"
+                 value="{% if selected_project.pm_name %}{{ selected_project.pm_name }} ({{ selected_project.pm_user_id|default_if_none:'' }}){% endif %}" />
+          <input id="pm_user_id" name="pm_user_id" type="hidden" value="{% if selected_project.pm_user_id %}{{ selected_project.pm_user_id }}{% endif %}" />
+          <input id="pm_name" type="text" readonly class="form-input" style="margin-top:8px;background:#f8fafc;" value="{{ selected_project.pm_name|default_if_none:'' }}" />
+          <div id="pm_suggestions" class="autocomplete-list" aria-hidden="true"></div>
+        </label>
+
+        <label>
+          <div style="font-weight:700;margin-bottom:8px">Description</div>
+          <textarea name="description" id="description" rows="4" class="form-input" placeholder="Short description">{{ selected_project.description|default_if_none:'' }}</textarea>
+        </label>
+
+        <div class="form-actions" style="margin-top:6px;">
+          <button type="button" id="resetBtn" class="btn secondary">Reset</button>
+          <button type="submit" class="btn primary">Edit Project</button>
         </div>
       </form>
     </div>
+
+    <!-- DETAILS: show full project data below -->
+    <div class="panel" style="padding:18px; margin-top:18px;">
+      <h2 style="margin:0 0 12px 0">Project Details</h2>
+      {% if selected_project %}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div><strong>Name</strong><div>{{ selected_project.name }}</div></div>
+          <div><strong>OEM</strong><div>{{ selected_project.oem_name|default_if_none:"—" }}</div></div>
+          <div><strong>PDL</strong><div>{{ selected_project.pdl_name|default_if_none:"—" }} {% if selected_project.pdl_user_id %}&lt;id: {{ selected_project.pdl_user_id }}&gt;{% endif %}</div></div>
+          <div><strong>PM</strong><div>{{ selected_project.pm_name|default_if_none:"—" }} {% if selected_project.pm_user_id %}&lt;id: {{ selected_project.pm_user_id }}&gt;{% endif %}</div></div>
+          <div><strong>Start</strong><div>{{ selected_project.start_date|default_if_none:"—" }}</div></div>
+          <div><strong>End</strong><div>{{ selected_project.end_date|default_if_none:"—" }}</div></div>
+          <div style="grid-column: 1 / -1;"><strong>Description</strong><div style="margin-top:6px">{{ selected_project.description|default_if_none:"—" }}</div></div>
+        </div>
+      {% else %}
+        <div class="muted">No project selected or no editable projects available where you are the creator.</div>
+      {% endif %}
+    </div>
   </div>
 
-  <!-- Right: Actions -->
-  <div style="flex:1; min-width:360px;">
-    <div class="actions-panel" style="padding:18px;border-radius:10px;background:#fff;border:1px solid rgba(15,23,42,0.04);box-shadow:0 6px 18px rgba(16,24,40,0.03)">
-      <h3>Project Actions</h3>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-        <a href="#" class="btn-light" data-open="coeCreateModal">➕ Create COE</a>
-        <a href="#" class="btn-light" data-open="coeListModal">✏️ Edit COE</a>
-        <a href="#" class="btn-light" data-open="coeLeaderModal">👤 Assign/Edit Leader</a>
-        <a href="#" class="btn-light" data-open="domainCreateModal">📂 Create Domain</a>
-        <a href="#" class="btn-light" data-open="domainEditModal">✏️ Edit Domain</a>
+  <!-- RIGHT: Action Panel (flat button list) -->
+  <div class="actions-column" style="flex:1;min-width:360px;">
+    <div class="actions-panel" id="actionsPanel">
+      <h3 style="margin:0 0 16px 0">Project Actions</h3>
+      <div class="action-buttons">
         <a href="{% url 'projects:list' %}" class="btn-light">📑 View Projects</a>
-        <a href="#" class="btn-light danger" data-open="projectDeleteModal">🗑️ Delete Project</a>
+        <a href="{% url 'projects:create' %}" class="btn-light">➕ Create Project</a>
+        <a href="#" class="btn-light" onclick="window.scrollTo({top:0,behavior:'smooth'});return false;">✏️ Edit Project</a>
+        <a href="#" class="btn-light danger">🗑️ Delete Project</a>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Mapping panel below the edit form -->
-<div class="mapping-card" id="mappingCard">
-  <div style="display:flex; justify-content:space-between; align-items:center;">
-    <div>
-      <div class="mapping-title">Assign COEs to this Project</div>
-    </div>
-
-    <div style="display:flex; align-items:center; gap:12px;">
-      <label class="select-all-label"><input type="checkbox" id="selectAllCoes"> Select all</label>
-      <input id="coeFilterInput" class="coe-filter" placeholder="Filter COEs by name..." />
-    </div>
-  </div>
-
-  <div class="mapping-grid" style="margin-top:12px;">
-    <div class="mapping-left">
-      <div style="font-weight:600; margin-bottom:8px;">Project</div>
-      <ul class="project-list" id="projectList">
-        <li class="project-item">
-          <label style="display:flex; gap:10px; align-items:center; width:100%;">
-            <input type="radio" name="project_choice" value="{{ project.id }}" checked>
-            <div>
-              <div style="font-weight:700;">{{ project.name }}</div>
-              <div class="meta">Edit mapping for this project</div>
-            </div>
-          </label>
-        </li>
-      </ul>
-    </div>
-
-    <div class="mapping-right">
-      <div style="font-weight:600; margin-bottom:8px;">COEs</div>
-
-      <table class="coe-table">
-        <thead>
-          <tr><th style="width:48px"></th><th>COE Name</th></tr>
-        </thead>
-        <tbody id="coeTbody">
-          {% if coes %}
-            {% for coe in coes %}
-              <tr data-coe-name="{{ coe.name|lower }}">
-                <td style="width:48px; padding:8px 12px;"><input type="checkbox" class="coe-checkbox" value="{{ coe.id }}" {% if coe.id in assigned_coe_ids %}checked{% endif %}></td>
-                <td style="padding:8px 12px;">{{ coe.name }}</td>
-              </tr>
-            {% endfor %}
-          {% else %}
-            <tr><td colspan="2" class="muted" style="padding:12px">No COEs available.</td></tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="mapping-controls">
-    <button type="button" class="btn secondary" id="mappingClearBtn">Clear</button>
-    <button type="button" class="btn primary" id="mappingSaveBtn">Save</button>
-  </div>
-</div>
-
 {% block extra_js %}
 <script src="{% static 'projects/js/projects-actions.js' %}"></script>
+
 <script>
-/* mapping logic for edit page: reuse same JS names and behavior as create page */
-(function(){
-  // identical inline mapping handling used in create_project.html; you can keep both for robustness
-  // This script uses the same DOM IDs as create page mapping panel
-  // If projects-actions.js attaches window.refreshCoesList / refreshProjectsList, they will be used after saving.
-})();
+  // Reset button behaviour: reset the visible fields to last loaded selected_project values
+  (function(){
+    const resetBtn = document.getElementById('resetBtn');
+    resetBtn && resetBtn.addEventListener('click', function(){
+      // simple page reload is the easiest reliable reset (preserves server state)
+      location.reload();
+    });
+
+    // When project selection changes, reload the page to show the selected project's values
+    const projectChoice = document.getElementById('project_choice');
+    projectChoice && projectChoice.addEventListener('change', function(){
+      const val = this.value;
+      if (!val) return;
+      // redirect to edit/<project_id>/ (this view will load selected project)
+      location.href = "{% url 'projects:edit' 0 %}".replace('/0/','/' + val + '/');
+    });
+
+    // We'll wire fill-ins after projects-actions.js initializes its autocomplete.
+    // That file wires pdl_picker and others; we added pm wiring as well in its updated source.
+    // Listen for autocomplete selections by observing hidden fields and copying CN to readonly fields.
+    function attachHiddenWatcher(hiddenId, nameFieldId, pickerId){
+      const hidden = document.getElementById(hiddenId);
+      const nameField = document.getElementById(nameFieldId);
+      const picker = document.getElementById(pickerId);
+      if (!hidden || !nameField || !picker) return;
+      // when hidden changes (set by autocomplete), update the readonly name input to whatever the visible picker shows (strip email)
+      hidden.addEventListener('change', function(){
+        // visible picker value usually contains "CN (email)" - extract CN portion
+        const v = picker.value || '';
+        const m = v.match(/^(.+?)\s*\(/);
+        if (m) {
+          nameField.value = m[1].trim();
+        } else {
+          // fallback to hidden if visible not set
+          nameField.value = v || hidden.value || '';
+        }
+      });
+      // also on page load ensure nameField is set if values exist
+      if (picker.value && !nameField.value) {
+        const m = picker.value.match(/^(.+?)\s*\(/);
+        if (m) nameField.value = m[1].trim();
+      }
+    }
+
+    // Attach watchers for PDL and PM
+    attachHiddenWatcher('pdl_user_id', 'pdl_name', 'pdl_picker');
+    attachHiddenWatcher('pm_user_id', 'pm_name', 'pm_picker');
+  })();
 </script>
 {% endblock %}
 {% endblock %}

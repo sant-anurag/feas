@@ -1,20 +1,18 @@
-# projects/views.py
 import logging
-from django.shortcuts import render, redirect
-from django.conf import settings
-from django.urls import reverse
-from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAllowed
-from django.views.decorators.http import require_GET, require_POST
-import mysql.connector
-from mysql.connector import Error, IntegrityError
 import json
 from datetime import datetime
-from django.shortcuts import render
-from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
-from django.db import connection, transaction
-from django.views.decorators.http import require_http_methods
-from django.contrib.auth.decorators import login_required
 
+from django.conf import settings
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.db import connection, transaction
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAllowed, HttpResponseForbidden
+from django.shortcuts import render, redirect
+from django.urls import reverse
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
+
+import mysql.connector
+from mysql.connector import Error, IntegrityError
 # -------------------------
 # LDAP helpers (use your ldap_utils)
 # -------------------------
@@ -517,49 +515,190 @@ def create_project(request):
         "users": users, "coes": coes, "projects": projects, "domains": domains
     })
 
-def edit_project(request, project_id):
-    if request.method == "POST":
-        name = (request.POST.get("name") or "").strip()
-        desc = (request.POST.get("description") or "").strip()
-        start_date = request.POST.get("start_date") or None
-        end_date = request.POST.get("end_date") or None
-        pdl_username = request.POST.get("pdl_username") or None
-        mapped_coe_ids = request.POST.getlist("mapped_coe_ids")
+def edit_project(request, project_id=None):
+    """
+    Edit project page:
+      - Shows a dropdown of projects where the logged-in user is the creator (derived from prism_wbs.creator).
+      - Allows editing of fields: oem_name, pdl_user_id, pdl_name (auto), pm_user_id, pm_name (auto),
+        start_date, end_date, description.
+      - Uses LDAP helper get_user_entry_by_username(...) to populate CN (pdl_name/pm_name).
+    """
+    session_cn = request.session.get("cn", "").strip()  # e.g. "DEO Sant Anurag"
+    session_ldap = request.session.get("ldap_username")
+    session_pwd = request.session.get("ldap_password")
+    creds = (session_ldap, session_pwd) if session_ldap and session_pwd else None
 
-        if not name:
-            return HttpResponseBadRequest("Project name required")
+    # helper to turn "DEO Sant Anurag" -> "Sant Anurag DEO"
+    def cn_to_creator(cn: str):
+        if not cn:
+            return ""
+        parts = cn.split()
+        if len(parts) >= 2:
+            # last name is first token, rest are given names
+            return " ".join(parts[1:]) + " " + parts[0]
+        return cn
 
-        pdl_user_id = None
-        if pdl_username:
-            pdl_user_id = _ensure_user_from_ldap(request,pdl_username)
-
+    # fetch projects where this session user is creator in prism_wbs
+    editable_projects = []
+    try:
+        creator_name = cn_to_creator(session_cn)
         conn = get_connection()
-        cur = conn.cursor()
+        cur = conn.cursor(dictionary=True)
         try:
+            # join prism_wbs -> projects to list unique projects where creator matches
             cur.execute("""
-                UPDATE projects SET name=%s, description=%s, start_date=%s, end_date=%s, pdl_user_id=%s WHERE id=%s
-            """, (name, desc or None, start_date, end_date, pdl_user_id, project_id))
-            conn.commit()
+                SELECT DISTINCT p.id, p.name
+                FROM prism_wbs pw
+                JOIN projects p ON pw.project_id = p.id
+                WHERE TRIM(pw.creator) = %s
+                ORDER BY p.name
+            """, (creator_name,))
+            editable_projects = cur.fetchall() or []
         finally:
             cur.close(); conn.close()
+    except Exception:
+        logger.exception("Failed to fetch editable projects for creator=%s", creator_name)
+        editable_projects = []
 
+    # POST: save edits
+    if request.method == "POST":
+        # project_id may come from the form (dropdown)
         try:
-            int_coe_ids = [int(x) for x in mapped_coe_ids if x]
+            form_project_id = int(request.POST.get("project_choice") or project_id or 0)
         except Exception:
-            int_coe_ids = []
-        _replace_project_coes(project_id, int_coe_ids)
+            return HttpResponseBadRequest("Invalid project selected")
 
-        return redirect(reverse("projects:list"))
+        # ensure the selected project is in editable_projects (authorization)
+        allowed_ids = {p["id"] for p in editable_projects}
+        if allowed_ids and form_project_id not in allowed_ids:
+            return HttpResponseForbidden("You are not authorized to edit this project")
 
-    project = _fetch_project(project_id)
-    if not project:
-        return HttpResponseBadRequest("Project not found")
-    users = _fetch_users()
-    coes = _get_all_coes()
-    assigned_ids = _get_project_coe_ids(project_id)
+        # gather posted values
+        oem_name = (request.POST.get("oem_name") or "").strip() or None
+        pdl_sel = (request.POST.get("pdl_user_id") or "").strip() or None  # we expect email primarily
+        pm_sel = (request.POST.get("pm_user_id") or "").strip() or None
+        start_date = request.POST.get("start_date") or None
+        end_date = request.POST.get("end_date") or None
+        description = (request.POST.get("description") or "").strip() or None
+
+        # helper: ensure user exists in users table and return user_id (re-uses existing helper)
+        pdl_user_id_db = None
+        pm_user_id_db = None
+        pdl_name_val = None
+        pm_name_val = None
+
+        # If pdl_sel present, canonicalize and create users row (store as id).
+        if pdl_sel:
+            try:
+                # prefer creating/looking up via ldap canonical identifier
+                pdl_user_id_db = _ensure_user_from_ldap(request, pdl_sel)
+            except Exception:
+                logger.exception("Failed to ensure PDL user for %s", pdl_sel)
+                pdl_user_id_db = None
+
+            # attempt to read CN from LDAP
+            try:
+                user_entry = None
+                try:
+                    user_entry = get_user_entry_by_username(pdl_sel, username_password_for_conn=creds)
+                except Exception:
+                    logger.exception("LDAP lookup for PDL failed for %s", pdl_sel)
+                    user_entry = None
+
+                if user_entry:
+                    # try common name extraction
+                    if hasattr(user_entry, "entry_attributes_as_dict"):
+                        attrs = user_entry.entry_attributes_as_dict
+                        pdl_name_val = (attrs.get("cn") or attrs.get("displayName") or attrs.get("name") or None)
+                        if isinstance(pdl_name_val, (list, tuple)):
+                            pdl_name_val = pdl_name_val[0] if pdl_name_val else None
+                    elif isinstance(user_entry, dict):
+                        pdl_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get("name")
+                    else:
+                        pdl_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName", None)
+                    if pdl_name_val:
+                        pdl_name_val = str(pdl_name_val).strip()
+            except Exception:
+                logger.exception("Error extracting PDL cn for %s", pdl_sel)
+
+        if pm_sel:
+            try:
+                pm_user_id_db = _ensure_user_from_ldap(request, pm_sel)
+            except Exception:
+                logger.exception("Failed to ensure PM user for %s", pm_sel)
+                pm_user_id_db = None
+
+            try:
+                user_entry = None
+                try:
+                    user_entry = get_user_entry_by_username(pm_sel, username_password_for_conn=creds)
+                except Exception:
+                    logger.exception("LDAP lookup for PM failed for %s", pm_sel)
+                    user_entry = None
+
+                if user_entry:
+                    if hasattr(user_entry, "entry_attributes_as_dict"):
+                        attrs = user_entry.entry_attributes_as_dict
+                        pm_name_val = (attrs.get("cn") or attrs.get("displayName") or attrs.get("name") or None)
+                        if isinstance(pm_name_val, (list, tuple)):
+                            pm_name_val = pm_name_val[0] if pm_name_val else None
+                    elif isinstance(user_entry, dict):
+                        pm_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get("name")
+                    else:
+                        pm_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName", None)
+                    if pm_name_val:
+                        pm_name_val = str(pm_name_val).strip()
+            except Exception:
+                logger.exception("Error extracting PM cn for %s", pm_sel)
+
+        # persist update to projects table
+        try:
+            conn = get_connection()
+            cur = conn.cursor()
+            try:
+                cur.execute("""
+                    UPDATE projects
+                    SET oem_name=%s,
+                        pdl_user_id=%s,
+                        pdl_name=%s,
+                        pm_user_id=%s,
+                        pm_name=%s,
+                        start_date=%s,
+                        end_date=%s,
+                        description=%s
+                    WHERE id=%s
+                """, (oem_name, pdl_user_id_db, pdl_name_val, pm_user_id_db, pm_name_val, start_date, end_date, description, form_project_id))
+                conn.commit()
+            finally:
+                cur.close(); conn.close()
+            messages.success(request, "Project updated successfully.")
+            # after successful save, redirect to same page to display latest details
+            return redirect(reverse("projects:edit", args=[form_project_id]))
+        except IntegrityError as e:
+            logger.exception("Project update IntegrityError: %s", e)
+            messages.error(request, "Project update failed (duplicate or constraint).")
+            return redirect(reverse("projects:edit", args=[form_project_id]))
+        except Exception as ex:
+            logger.exception("Project update failed: %s", ex)
+            messages.error(request, f"Failed to update project: {str(ex)}")
+            return redirect(reverse("projects:edit", args=[form_project_id]))
+
+    # GET: show form
+    # If project_id provided, load that project's current values; else choose first editable project
+    selected_project_id = project_id or (editable_projects[0]["id"] if editable_projects else None)
+    project = None
+    if selected_project_id:
+        project = _fetch_project(selected_project_id)
+    else:
+        project = None
+
+    # Also include list of editable projects for dropdown
     return render(request, "projects/edit_project.html", {
-        "project": project, "users": users, "coes": coes, "assigned_coe_ids": assigned_ids
+        "editable_projects": editable_projects,
+        "selected_project": project,
+        "ldap_username": session_ldap,
     })
+
 
 @require_POST
 def map_coes(request):

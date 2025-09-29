@@ -13,7 +13,6 @@
 <body>
 <header class="app-header">
   <div class="header-left">
-    <!-- removed ☰ icon -->
     <div class="brand">
       <div class="brand-text">Program Resource Integration & Smart Management</div>
     </div>
@@ -41,6 +40,9 @@
   </div>
 </header>
 
+{# Use only the safe no-argument edit route as a fallback. This avoids NoReverseMatch. #}
+{% url 'projects:edit_default' as projects_edit_default_url %}
+
 <div class="layout">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
@@ -59,19 +61,26 @@
       <ul class="side-nav" id="mainMenu">
         {% for item in feas_menu %}
           <li class="side-item">
+            {% comment %}
+              Link resolution logic:
+               1) prefer item.url if provided (already resolved in context processor)
+               2) else fall back to projects_edit_default_url
+               3) else '#'
+            {% endcomment %}
+
             {% if item.submenus %}
-              <a href="{{ item.url|default:'#' }}" class="side-link has-sub-toggle" aria-expanded="false">
+              <a href="{{ item.url|default:projects_edit_default_url|default:'#' }}" class="side-link has-sub-toggle" aria-expanded="false">
                 <span class="icon">{{ item.title|slice:":1"|upper }}</span>
                 <span class="side-label" title="{{ item.title }}">{{ item.title }}</span>
                 <span class="mi-caret">▾</span>
               </a>
               <ul class="submenu" aria-hidden="true">
                 {% for s in item.submenus %}
-                  <li><a class="sub-item" href="{{ s.url|default:'#' }}">{{ s.title }}</a></li>
+                  <li><a class="sub-item" href="{{ s.url|default:projects_edit_default_url|default:'#' }}">{{ s.title }}</a></li>
                 {% endfor %}
               </ul>
             {% else %}
-              <a href="{{ item.url|default:'#' }}" class="side-link">
+              <a href="{{ item.url|default:projects_edit_default_url|default:'#' }}" class="side-link">
                 <span class="icon">{{ item.title|slice:":1"|upper }}</span>
                 <span class="side-label" title="{{ item.title }}">{{ item.title }}</span>
               </a>

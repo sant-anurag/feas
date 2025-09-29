@@ -1,10 +1,8 @@
 // static/projects/js/projects-actions.js
-// Modal wiring + LDAP autocomplete + robust (debounced & guarded) POST handlers
-// Prevents duplicate submits by disabling buttons and using a guard.
 
 document.addEventListener("DOMContentLoaded", function() {
 
-  // ---------- modal open/close ----------
+  // simple modal open/close
   document.querySelectorAll("[data-open]").forEach(btn => {
     btn.addEventListener("click", function() {
       const id = btn.getAttribute("data-open");
@@ -33,13 +31,14 @@ document.addEventListener("DOMContentLoaded", function() {
     document.body.style.overflow = "";
   }
 
+  // close modal on ESC
   document.addEventListener("keyup", function(e) {
     if (e.key === "Escape") {
       document.querySelectorAll(".modal[aria-hidden='false']").forEach(closeModal);
     }
   });
 
-  // ---------- LDAP autocomplete (unchanged) ----------
+  // ---------------- LDAP autocomplete helpers ----------------
   function wireAutocomplete(inputId, hiddenId, suggestionBoxId) {
     const input = document.getElementById(inputId);
     const hidden = document.getElementById(hiddenId);
@@ -65,7 +64,10 @@ document.addEventListener("DOMContentLoaded", function() {
           .then(data => {
             items = data.results || [];
             box.innerHTML = "";
-            if (items.length === 0) { box.style.display = "none"; return; }
+            if (items.length === 0) {
+              box.style.display = "none";
+              return;
+            }
             items.forEach((it, idx) => {
               const el = document.createElement("div");
               el.className = "autocomplete-item";
@@ -73,7 +75,9 @@ document.addEventListener("DOMContentLoaded", function() {
               el.dataset.idx = idx;
               el.innerHTML = `<div class="a-title">${escapeHtml(it.cn || it.sAMAccountName)}</div>
                               <div class="a-sub">${escapeHtml(it.mail || '')} <span class="a-muted">${escapeHtml(it.title||'')}</span></div>`;
-              el.addEventListener("click", function(){ select(idx); });
+              el.addEventListener("click", function(){
+                select(idx);
+              });
               box.appendChild(el);
             });
             box.style.display = "block";
@@ -87,14 +91,29 @@ document.addEventListener("DOMContentLoaded", function() {
 
     input.addEventListener("keydown", function(e){
       const itemsEls = box.querySelectorAll(".autocomplete-item");
-      if (e.key === "ArrowDown") { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, itemsEls.length - 1); highlight(itemsEls); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, 0); highlight(itemsEls); }
-      else if (e.key === "Enter") { e.preventDefault(); if (activeIndex >= 0 && itemsEls[activeIndex]) select(itemsEls[activeIndex].dataset.idx); }
-      else if (e.key === "Escape") { box.style.display = "none"; }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        activeIndex = Math.min(activeIndex + 1, itemsEls.length - 1);
+        highlight(itemsEls);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        activeIndex = Math.max(activeIndex - 1, 0);
+        highlight(itemsEls);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (activeIndex >= 0 && itemsEls[activeIndex]) {
+          const idx = itemsEls[activeIndex].dataset.idx;
+          select(idx);
+        }
+      } else if (e.key === "Escape") {
+        box.style.display = "none";
+      }
     });
 
     document.addEventListener("click", function(ev){
-      if (!box.contains(ev.target) && ev.target !== input) { box.style.display = "none"; }
+      if (!box.contains(ev.target) && ev.target !== input) {
+        box.style.display = "none";
+      }
     });
 
     function highlight(itemsEls){
@@ -104,234 +123,25 @@ document.addEventListener("DOMContentLoaded", function() {
         itemsEls[activeIndex].scrollIntoView({block:"nearest"});
       }
     }
-      function select(idx){
-          const it = items[idx];
-          if (!it) return;
-
-          // Friendly text shown to the user: displayName / cn with mail/UPN in parens
-          const displayName = it.cn || it.displayName || it.sAMAccountName || '';
-          const canonicalId = it.userPrincipalName || it.mail || ''; // prefer UPN, fallback mail
-
-          input.value = `${displayName}${canonicalId ? ' <' + canonicalId + '>' : ''}`;
-
-          // IMPORTANT: send only the canonical LDAP login (UPN or mail) to backend
-          // This prevents samAccountName (short) from getting stored.
-          hidden.value = canonicalId;
-
-          box.style.display = "none";
+    function select(idx){
+      const it = items[idx];
+      if (!it) return;
+      // Visible: CN (mail) – best UX
+      input.value = `${it.cn || it.sAMAccountName} (${it.mail||''})`;
+      // Hidden: prefer email (mail) as canonical storage; fallback to sAMAccountName or cn
+      hidden.value = it.mail || it.sAMAccountName || it.cn;
+      box.style.display = "none";
+      // Trigger change to allow listeners to react (e.g. fill readonly name)
+      const ev = new Event('change', { bubbles: true });
+      hidden.dispatchEvent(ev);
     }
 
+    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
+  }
 
-
-  wireAutocomplete("pdl_picker","pdl_username","pdl_suggestions");
+  // wire pickers present in template
+  wireAutocomplete("pdl_picker","pdl_user_id","pdl_suggestions");
+  wireAutocomplete("pm_picker","pm_user_id","pm_suggestions");
   wireAutocomplete("coe_leader_picker","coe_leader_username","coe_leader_suggestions");
   wireAutocomplete("domain_lead_picker","domain_lead_username","domain_lead_suggestions");
-  wireAutocomplete("domain_edit_lead_picker","domain_edit_lead_username","domain_edit_lead_suggestions");
-
-  // ---------- CSRF helper ----------
-  function getCookie(name) {
-    const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
-    return v ? v.pop() : '';
-  }
-  const csrftoken = getCookie('csrftoken');
-
-  // ---------- robust POST helper ----------
-  function postFormRobust(url, formData, onSuccess, onError) {
-    return fetch(url, {
-      method: 'POST',
-      headers: {
-        'X-CSRFToken': csrftoken,
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: formData,
-      credentials: 'same-origin'
-    }).then(async resp => {
-      const contentType = resp.headers.get('content-type') || '';
-      const status = resp.status;
-      let bodyText = null;
-      try {
-        if (contentType.includes('application/json')) {
-          const json = await resp.json();
-          bodyText = JSON.stringify(json);
-          if (!resp.ok) throw {status, body: json};
-          return {ok: true, data: json};
-        } else {
-          bodyText = await resp.text();
-          if (!resp.ok) throw {status, body: bodyText};
-          return {ok: true, data: bodyText};
-        }
-      } catch (err) {
-        throw err;
-      }
-    }).then(result => {
-      if (onSuccess) onSuccess(result.data);
-      return result.data;
-    }).catch(err => {
-      console.error('[projects-actions] POST error', err);
-      if (onError) onError(err);
-      else {
-        let msg = 'Request failed';
-        if (err && err.status) msg += ` (status ${err.status})`;
-        if (err && err.body) msg += ': ' + (typeof err.body === 'string' ? err.body : JSON.stringify(err.body));
-        alert(msg);
-      }
-      throw err;
-    });
-  }
-
-  // ---------- prevent double submissions helper ----------
-  function withSingleSubmission(button, handler) {
-    // Use a closure flag so multiple listeners / double clicks cannot submit twice
-    let inProgress = false;
-    if (!button) return function(){};
-    const wrapped = function(e) {
-      e && e.preventDefault && e.preventDefault();
-      if (inProgress) {
-        console.warn('Submission prevented: already in progress');
-        return;
-      }
-      inProgress = true;
-      button.setAttribute('aria-disabled', 'true');
-      button.disabled = true;
-      // call handler; ensure we unset inProgress on both success/error
-      const done = function() {
-        inProgress = false;
-        button.disabled = false;
-        button.removeAttribute('aria-disabled');
-      };
-      // handler must return a Promise (or we wrap result)
-      try {
-        const res = handler();
-        if (res && typeof res.then === 'function') {
-          res.then(done).catch(err => { done(); throw err; });
-        } else {
-          done();
-        }
-      } catch (err) {
-        done();
-        throw err;
-      }
-    };
-    return wrapped;
-  }
-
-  // ---------- Modal action handlers (create/assign) ----------
-  const coeSaveBtn = document.getElementById('coeCreateSave');
-  if (coeSaveBtn) {
-    const handler = function() {
-      const name = (document.getElementById('coe_name_input') || {}).value || '';
-      const desc = (document.getElementById('coe_desc_input') || {}).value || '';
-      const leader = (document.getElementById('coe_leader_username') || {}).value || '';
-      if (!name.trim()) { alert('COE name is required'); return Promise.resolve(); }
-
-      const fd = new FormData();
-      fd.append('name', name.trim());
-      fd.append('description', desc.trim());
-      if (leader) fd.append('leader_username', leader);
-
-      return postFormRobust('/projects/coes/create/', fd, function(data){
-        const m = document.getElementById('coeCreateModal');
-        if (m) closeModal(m);
-        window.location.reload();
-      }, function(err) {
-        // if error returned as JSON with 'error', present it
-        if (err && err.body) {
-          const b = typeof err.body === 'string' ? err.body : JSON.stringify(err.body);
-          try {
-            const parsed = (typeof err.body === 'string') ? JSON.parse(err.body) : err.body;
-            if (parsed && parsed.error) alert(parsed.error);
-          } catch(e) {
-            // ignore parse
-          }
-        }
-      });
-    };
-    coeSaveBtn.addEventListener('click', withSingleSubmission(coeSaveBtn, handler));
-  }
-
-  const domainSaveBtn = document.getElementById('domainCreateSave');
-  if (domainSaveBtn) {
-    const handler = function() {
-      const name = (document.getElementById('domain_name_input') || {}).value || '';
-      const coe = (document.getElementById('domain_coe_select') || {}).value || '';
-      const lead = (document.getElementById('domain_lead_username') || {}).value || '';
-      if (!name.trim()) { alert('Domain name required'); return Promise.resolve(); }
-      const fd = new FormData();
-      fd.append('name', name.trim());
-      if (coe) fd.append('coe_id', coe);
-      if (lead) fd.append('lead_username', lead);
-      return postFormRobust('/projects/domains/create/', fd, function(data){
-        const m = document.getElementById('domainCreateModal');
-        if (m) closeModal(m);
-        window.location.reload();
-      }, function(err) {
-        if (err && err.body) {
-          try {
-            const parsed = (typeof err.body === 'string') ? JSON.parse(err.body) : err.body;
-            if (parsed && parsed.error) alert(parsed.error);
-          } catch(e){}
-        }
-      });
-    };
-    domainSaveBtn.addEventListener('click', withSingleSubmission(domainSaveBtn, handler));
-  }
-
-  // COE edit/assign/ domain edit handlers remain similar but also use single submission guard
-  const coeUpdateBtn = document.getElementById('coeUpdateBtn');
-  if (coeUpdateBtn) {
-    const handler = function() {
-      const sel = document.getElementById('coe_select');
-      if (!sel || !sel.value) { alert('Select COE to update'); return Promise.resolve(); }
-      const coeId = sel.value;
-      const desc = (document.getElementById('coe_edit_desc') || {}).value || '';
-      const fd = new FormData();
-      fd.append('name', sel.options[sel.selectedIndex].text || '');
-      fd.append('description', desc);
-      const leader = (document.getElementById('coe_leader_username') || {}).value || '';
-      if (leader) fd.append('leader_username', leader);
-      return postFormRobust(`/projects/coes/edit/${encodeURIComponent(coeId)}/`, fd, function(){ window.location.reload(); });
-    };
-    coeUpdateBtn.addEventListener('click', withSingleSubmission(coeUpdateBtn, handler));
-  }
-
-  const assignBtn = document.getElementById('assignCoeLeaderBtn');
-  if (assignBtn) {
-    const handler = function() {
-      const coeSel = document.getElementById('coe_for_leader');
-      const leaderUsername = (document.getElementById('coe_leader_username') || {}).value || '';
-      if (!coeSel || !coeSel.value) { alert('Select COE'); return Promise.resolve(); }
-      if (!leaderUsername) { alert('Search and select a user first'); return Promise.resolve(); }
-      const fd = new FormData();
-      fd.append('leader_username', leaderUsername);
-      return postFormRobust(`/projects/coes/edit/${encodeURIComponent(coeSel.value)}/`, fd, function(){ window.location.reload(); });
-    };
-    assignBtn.addEventListener('click', withSingleSubmission(assignBtn, handler));
-  }
-
-  const domainUpdateBtn = document.getElementById('domainUpdateBtn');
-  if (domainUpdateBtn) {
-    const handler = function() {
-      const sel = document.getElementById('domain_select');
-      if (!sel || !sel.value) { alert('Select domain to update'); return Promise.resolve(); }
-      const domainId = sel.value;
-      const lead = (document.getElementById('domain_edit_lead_username') || {}).value || '';
-      const name = sel.options[sel.selectedIndex].text || '';
-      const fd = new FormData();
-      fd.append('name', name);
-      if (lead) fd.append('lead_username', lead);
-      return postFormRobust(`/projects/domains/edit/${encodeURIComponent(domainId)}/`, fd, function(){ window.location.reload(); });
-    };
-    domainUpdateBtn.addEventListener('click', withSingleSubmission(domainUpdateBtn, handler));
-  }
-
-  // Project delete left as-is (no destructive auto-delete via modal)
-  const projectDeleteConfirm = document.getElementById('projectDeleteConfirm');
-  if (projectDeleteConfirm) {
-    projectDeleteConfirm.addEventListener('click', function(e){
-      e.preventDefault();
-      alert('Use Project list page for deletion (modal delete not configured).');
-      const m = document.getElementById('projectDeleteModal'); if (m) closeModal(m);
-    });
-  }
-
 });

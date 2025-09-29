@@ -425,14 +425,45 @@ def import_master(request):
                         errors.append(f"Failed to insert project '{p}': {e}")
 
             # Populate prism_wbs using ON DUPLICATE KEY UPDATE
+            # -----------------------------
+            # Populate prism_wbs using ON DUPLICATE KEY UPDATE (QUOTED IDENTIFIERS)
+            # -----------------------------
+            def _find(orig_variants):
+                return find_col_by_variants(orig_variants)
+
+            # detect columns (same as before)
+            status_col = _find(["Status", "status", "Request Status"])
+            bg_code_col = _find(["BG Code", "BG_Code", "bg_code", "bg code"])
+            year_col = _find(["Year", "year"])
+            seller_country_col = _find(["Seller Country", "seller_country", "seller country", "Country"])
+            creator_col = _find(["Creator", "creator", "Requesting Manager", "Requested By"])
+            date_created_col = _find(["Date Created", "date_created", "datecreated", "Created At"])
+            comment_col = _find(["Comment of Creator", "comment_of_creator", "Comment", "Comments", "comment"])
+            buyer_bau_col = _find(["Buyer BAU", "buyer_bau", "Buyer_BAU"])
+            seller_bau_col = _find(["Seller BAU", "seller_bau", "Seller_BAU"])
+            site_col = _find(["Site", "site", "Location"])
+            function_col = _find(["Function", "function"])
+            department_col = _find(["Department", "department"])
+            buyer_wbs_col = buyer_wbs_col or _find(["Buyer WBS/CC", "Buyer WBS", "Buyer_WBS_CC", "Buyer_WBS"])
+            seller_wbs_col = seller_wbs_col or _find(["Seller WBS/CC", "Seller WBS", "Seller_WBS_CC", "Seller_WBS"])
+
+            months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+            month_hours_cols = {}
+            month_fte_cols = {}
+            for m in months:
+                month_hours_cols[m] = _find(
+                    [f"{m}_hours", f"{m.title()} Hours", f"{m.title()}_Hours", f"{m}", f"{m.upper()}"])
+                month_fte_cols[m] = _find([f"{m}_fte", f"{m.title()} FTE", f"{m.title()}_FTE"])
+
+            # iterate rows and upsert
             for _, row in df.iterrows():
-                # IOM id
+                # iom id extraction (same logic)
                 iom_val = None
                 if id_col:
                     orig = col_to_orig.get(id_col)
                     iom_val = row.get(orig) if orig else None
-                # fallback search for header literally 'id'
                 if iom_val is None:
+                    # fallback: try literal "id" header
                     for orig_header, dbcol in mapping:
                         if str(orig_header).strip().lower() == "id":
                             iom_val = row.get(orig_header)
@@ -441,61 +472,100 @@ def import_master(request):
                     continue
                 iom_val = str(iom_val).strip()
 
-                # get values
-                buyer_wbs_val = None
-                seller_wbs_val = None
-                total_hours_val = None
-                total_fte_val = None
-                if buyer_wbs_col:
-                    o = col_to_orig.get(buyer_wbs_col)
-                    buyer_wbs_val = row.get(o) if o else None
-                if seller_wbs_col:
-                    o = col_to_orig.get(seller_wbs_col)
-                    seller_wbs_val = row.get(o) if o else None
-                if total_hours_col:
-                    o = col_to_orig.get(total_hours_col)
-                    total_hours_val = row.get(o) if o else None
-                if total_fte_col:
-                    o = col_to_orig.get(total_fte_col)
-                    total_fte_val = row.get(o) if o else None
-
-                # project id by program if available
+                # project id lookup
                 project_id = None
                 if prog_col:
                     orig = col_to_orig.get(prog_col)
                     progname = row.get(orig) if orig else None
                     if progname:
-                        progname = str(progname).strip()
-                        project_id = existing_projects.get(progname)
+                        project_id = existing_projects.get(str(progname).strip())
 
-                # convert params to safe types
-                params = [
-                    _param_safe(iom_val),               # iom_id
-                    _param_safe(buyer_wbs_val),         # buyer_wbs_cc
-                    _param_safe(seller_wbs_val),        # seller_wbs_cc
-                    _param_safe(total_hours_val),       # total_hours
-                    _param_safe(total_fte_val),         # total_fte
-                    _param_safe(project_id),            # project_id
+                def read_val(col_sanitized):
+                    if not col_sanitized:
+                        return None
+                    orig_h = col_to_orig.get(col_sanitized)
+                    if not orig_h:
+                        return None
+                    return _param_safe(row.get(orig_h))
+
+                # collect scalar fields
+                status_val = read_val(status_col)
+                bg_code_val = read_val(bg_code_col)
+                year_val = read_val(year_col)
+                seller_country_val = read_val(seller_country_col)
+                creator_val = read_val(creator_col)
+                date_created_val = read_val(date_created_col)
+                comment_val = read_val(comment_col)
+                buyer_bau_val = read_val(buyer_bau_col)
+                buyer_wbs_val = read_val(buyer_wbs_col)
+                seller_bau_val = read_val(seller_bau_col)
+                seller_wbs_val = read_val(seller_wbs_col)
+                site_val = read_val(site_col)
+                function_val = read_val(function_col)
+                department_val = read_val(department_col)
+                total_hours_val = read_val(total_hours_col)
+                total_fte_val = read_val(total_fte_col)
+
+                # months
+                months_hours_vals = {m: (read_val(month_hours_cols[m]) or 0) for m in months}
+                months_fte_vals = {m: (read_val(month_fte_cols[m]) or 0) for m in months}
+
+                # build ordered column list (use DB column names exactly)
+                insert_cols = [
+                    "iom_id", "status", "project_id", "bg_code", "year", "seller_country",
+                    "creator", "date_created", "comment_of_creator",
+                    "buyer_bau", "buyer_wbs_cc", "seller_bau", "seller_wbs_cc",
+                    "site", "function", "department"
                 ]
+                insert_cols += [f"{m}_hours" for m in months]
+                insert_cols += ["total_hours"]
+                insert_cols += [f"{m}_fte" for m in months]
+                insert_cols += ["total_fte"]
+
+                params = []
+                params.append(_param_safe(iom_val))
+                params.append(status_val)
+                params.append(_param_safe(project_id))
+                params.append(bg_code_val)
+                params.append(year_val)
+                params.append(seller_country_val)
+                params.append(creator_val)
+                params.append(date_created_val)
+                params.append(comment_val)
+                params.append(buyer_bau_val)
+                params.append(buyer_wbs_val)
+                params.append(seller_bau_val)
+                params.append(seller_wbs_val)
+                params.append(site_val)
+                params.append(function_val)
+                params.append(department_val)
+
+                for m in months:
+                    params.append(months_hours_vals.get(m, 0))
+                params.append(total_hours_val or 0)
+                for m in months:
+                    params.append(months_fte_vals.get(m, 0))
+                params.append(total_fte_val or 0)
+
+                # create sql pieces with backticks for safety
+                cols_clause = ", ".join([f"`{c}`" for c in insert_cols])
+                placeholders = ", ".join(["%s"] * len(insert_cols))
+                # IMPORTANT: quote identifiers in update clause too
+                update_clause = ",\n                          ".join(
+                    [f"`{c}`=VALUES(`{c}`)" for c in insert_cols if c != "iom_id"])
 
                 try:
-                    # Use ON DUPLICATE KEY UPDATE to upsert by iom_id (unique key)
-                    cursor.execute("""
-                        INSERT INTO prism_wbs (iom_id, buyer_wbs_cc, seller_wbs_cc, total_hours, total_fte, project_id)
-                        VALUES (%s,%s,%s,%s,%s,%s)
+                    cursor.execute(f"""
+                        INSERT INTO prism_wbs ({cols_clause})
+                        VALUES ({placeholders})
                         ON DUPLICATE KEY UPDATE
-                          buyer_wbs_cc = VALUES(buyer_wbs_cc),
-                          seller_wbs_cc = VALUES(seller_wbs_cc),
-                          total_hours = VALUES(total_hours),
-                          total_fte = VALUES(total_fte),
-                          project_id = VALUES(project_id)
+                          {update_clause}
                     """, params)
-                    # cursor.rowcount may be 1 on insert or 2 on update depending on adapter;
-                    # treat success if no exception
                     wbs_inserted += 1
                 except Exception as e:
                     wbs_failed += 1
                     errors.append(f"IOM {iom_val} upsert failed: {e}")
+
 
     except Exception as e:
         messages.error(request, f"Failed during projects/WBS population: {e}")

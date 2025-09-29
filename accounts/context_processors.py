@@ -23,8 +23,9 @@ MENU_TREE = [
         "url": "#",
         "roles": ["ADMIN", "PDL", "COE_LEADER", "TEAM_LEAD"],
         "submenus": [
-            {"key": "projects_list", "title": "Projects List", "url": reverse_lazy("projects:list"),"roles": ["ADMIN", "PDL"]},
-            {"key": "create_project", "title": "Create Project", "url": reverse_lazy("projects:create"),"roles": ["ADMIN", "PDL"]},
+            {"key": "projects_list", "title": "Projects List", "url": reverse_lazy("projects:list"), "roles": ["ADMIN", "PDL"]},
+            # IMPORTANT: use the safe no-argument route here so reverse doesn't require an id
+            {"key": "create_project", "title": "Edit Project", "url": reverse_lazy("projects:edit_default"), "roles": ["ADMIN", "PDL"]},
         ],
     },
 
