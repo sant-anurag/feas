@@ -8,6 +8,8 @@ urlpatterns = [
     path('', include('base.urls', namespace='dashboard')),  # landing dashboard
     path("projects/", include("projects.urls", namespace="projects")),
 path("resources/", include("resources.urls")),
+path("settings/", include("settings.urls", namespace="settings")),
+
 
 
 ]

@@ -124,19 +124,7 @@ class DatabaseInitializer:
                     FOREIGN KEY (`lead_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """,
-                """
-                CREATE TABLE IF NOT EXISTS `projects` (
-                    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    `name` VARCHAR(255) NOT NULL,
-                    `pdl_user_id` BIGINT,
-                    `start_date` DATE,
-                    `end_date` DATE,
-                    `description` TEXT,
-                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY `uq_project_name` (`name`),
-                    FOREIGN KEY (`pdl_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-                """,
+
                 # NEW: project_coes mapping table (many-to-many: project <-> coe)
                 """
                 CREATE TABLE IF NOT EXISTS `project_coes` (
@@ -270,7 +258,97 @@ class DatabaseInitializer:
               `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
               `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-                            """
+                            """,
+                """
+                CREATE TABLE IF NOT EXISTS `prism_master_wor_meta` (
+                    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    `table_name` VARCHAR(128) NOT NULL,
+                    `col_order` INT NOT NULL,
+                    `col_name` VARCHAR(255) NOT NULL,
+                    `orig_header` VARCHAR(1024),
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uq_prism_master_meta` (`table_name`,`col_name`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS `projects` (
+                        `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        `name` VARCHAR(255) NOT NULL,
+                        `oem_name` VARCHAR(255),
+                        `pdl_user_id` BIGINT,
+                        `pm_user_id` BIGINT,
+                        `start_date` DATE,
+                        `end_date` DATE,
+                        `description` TEXT,
+                        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE KEY `uq_project_name` (`name`),
+                        FOREIGN KEY (`pdl_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                        FOREIGN KEY (`pm_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS `project_contacts` (
+                        `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        `project_id` BIGINT NOT NULL,
+                        `contact_type` VARCHAR(16) NOT NULL, -- 'PDL' or 'PM'
+                        `contact_name` VARCHAR(512),          -- original name from sheet (free text)
+                        `user_id` BIGINT NULL,                -- resolved ldap user id later (nullable)
+                        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE KEY `uq_proj_contact` (`project_id`,`contact_type`,`contact_name`),
+                        FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE,
+                        FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS `prism_wbs` (
+                        `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        `iom_id` VARCHAR(255) NOT NULL,   -- maps to sheet 'ID' column (original header)
+                        `status` VARCHAR(64),
+                        `project_id` BIGINT,              -- FK to projects
+                        `bg_code` VARCHAR(128),
+                        `year` VARCHAR(16),
+                        `seller_country` VARCHAR(128),
+                        `creator` VARCHAR(255),
+                        `date_created` DATETIME,
+                        `comment_of_creator` TEXT,
+                        `buyer_bau` VARCHAR(255),
+                        `buyer_wbs_cc` VARCHAR(255),
+                        `seller_bau` VARCHAR(255),
+                        `seller_wbs_cc` VARCHAR(255),
+                        `site` VARCHAR(255),
+                        `function` VARCHAR(255),
+                        `department` VARCHAR(255),
+                        `jan_hours` DECIMAL(10,2) DEFAULT 0,
+                        `feb_hours` DECIMAL(10,2) DEFAULT 0,
+                        `mar_hours` DECIMAL(10,2) DEFAULT 0,
+                        `apr_hours` DECIMAL(10,2) DEFAULT 0,
+                        `may_hours` DECIMAL(10,2) DEFAULT 0,
+                        `jun_hours` DECIMAL(10,2) DEFAULT 0,
+                        `jul_hours` DECIMAL(10,2) DEFAULT 0,
+                        `aug_hours` DECIMAL(10,2) DEFAULT 0,
+                        `sep_hours` DECIMAL(10,2) DEFAULT 0,
+                        `oct_hours` DECIMAL(10,2) DEFAULT 0,
+                        `nov_hours` DECIMAL(10,2) DEFAULT 0,
+                        `dec_hours` DECIMAL(10,2) DEFAULT 0,
+                        `total_hours` DECIMAL(14,2) DEFAULT 0,
+                        `jan_fte` DECIMAL(8,4) DEFAULT 0,
+                        `feb_fte` DECIMAL(8,4) DEFAULT 0,
+                        `mar_fte` DECIMAL(8,4) DEFAULT 0,
+                        `apr_fte` DECIMAL(8,4) DEFAULT 0,
+                        `may_fte` DECIMAL(8,4) DEFAULT 0,
+                        `jun_fte` DECIMAL(8,4) DEFAULT 0,
+                        `jul_fte` DECIMAL(8,4) DEFAULT 0,
+                        `aug_fte` DECIMAL(8,4) DEFAULT 0,
+                        `sep_fte` DECIMAL(8,4) DEFAULT 0,
+                        `oct_fte` DECIMAL(8,4) DEFAULT 0,
+                        `nov_fte` DECIMAL(8,4) DEFAULT 0,
+                        `dec_fte` DECIMAL(8,4) DEFAULT 0,
+                        `total_fte` DECIMAL(12,4) DEFAULT 0,
+                        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE KEY `uq_prism_wbs_iom` (`iom_id`),
+                        FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE SET NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """
             ]
         )
 

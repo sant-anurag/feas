@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Import Master — Settings{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<link rel="stylesheet" href="{% static 'projects/css/projects-actions.css' %}">
+<style>
+  /* small local tweaks for the import UI */
+  .import-panel { max-width: 1100px; margin: 18px auto; padding: 18px; background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(16,24,40,0.04); }
+  .import-grid { display: grid; grid-template-columns: 1fr 360px; gap: 18px; align-items: start; }
+  .form-input { display: block; width: 100%; padding: 10px 12px; border: 1px solid #e6eef5; border-radius: 8px; background: #fbfdff; }
+  .btn { padding: 8px 12px; border-radius: 8px; cursor: pointer; border: none; }
+  .btn.primary { background: #0f63ff; color: #fff; box-shadow: 0 6px 18px rgba(15,99,255,0.12); }
+  .btn.secondary { background: #f4f6fb; color: #0b2b4a; border: 1px solid #e2e8f0; }
+  .small-muted { font-size: 13px; color: #334155; }
+  .actions-panel { padding: 12px; border-radius: 8px; background: #fbfdff; border: 1px solid #eef6ff; }
+  table.project-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.project-table thead th { background: #fbfcfe; padding: 10px; text-align: left; border-bottom: 1px solid #eef2f7; position: sticky; top: 0; z-index: 2; }
+  table.project-table td { padding: 8px 10px; border-bottom: 1px solid #f2f6fb; }
+  .msg-success { background:#eef9f0; color:#0b6b2f; padding:10px; border-radius:8px; border:1px solid #d2f3d6; }
+  .msg-error { background:#fff1f0; color:#8a1f11; padding:10px; border-radius:8px; border:1px solid #ffd8d4; }
+  .msg-warning { background:#fff8e6; color:#6b4c00; padding:10px; border-radius:8px; border:1px solid #ffecb5; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="import-panel">
+  <h2 style="margin:0 0 12px 0;">Settings — Import Master (WOR Details)</h2>
+
+  {% if messages %}
+    <div style="margin-bottom:12px;">
+      {% for m in messages %}
+        {% if 'error' in m.tags %}
+          <div class="msg-error">{{ m }}</div>
+        {% elif 'warning' in m.tags %}
+          <div class="msg-warning">{{ m }}</div>
+        {% else %}
+          <div class="msg-success">{{ m }}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="import-grid">
+    <div>
+      <form method="post" enctype="multipart/form-data" style="display:block;">
+        {% csrf_token %}
+        <label style="display:block;font-weight:700;margin-bottom:8px;">Select Excel file (first sheet will be used)</label>
+        <input type="file" name="file" accept=".xlsx,.xls" class="form-input" required />
+
+        <div style="margin-top:12px; display:flex; gap:10px;">
+          <button type="submit" name="import" class="btn primary">Import</button>
+          <button type="submit" name="reset" class="btn secondary">Reset</button>
+        </div>
+
+        <p class="small-muted" style="margin-top:12px;">
+          Upload the WOR Details Excel file. The first sheet will be used to create the master table with one
+          database column per sheet header. Header names are sanitized to safe SQL column names.
+        </p>
+
+        <div style="margin-top:14px; font-size:13px;">
+          <strong>Import options</strong>
+          <ul style="margin:8px 0 0 18px; color:#334155;">
+            <li>By default the import will <strong>drop and recreate</strong> the master table so schema exactly matches the sheet.</li>
+            <li>All sheet columns are stored as <code>TEXT</code> to preserve contents; type inference can be added later.</li>
+            <li>Large files may take time. For heavy production loads we'll add background jobs and CSV+LOAD pipeline.</li>
+          </ul>
+        </div>
+      </form>
+    </div>
+
+    <aside>
+      <div class="actions-panel">
+        <h3 style="margin-top:0;margin-bottom:10px;">Quick tips</h3>
+        <ol style="margin:0 0 0 16px; color:#334155;">
+          <li>Ensure the sheet has a single header row in the first row.</li>
+          <li>If the sheet contains an <strong>ID</strong> column we will try to add a unique index for deduping.</li>
+          <li>Ensure your DB user has CREATE/DROP/INSERT privileges before importing.</li>
+        </ol>
+
+        <div style="margin-top:12px;">
+          <h4 style="margin:0 0 8px 0;">Post-import</h4>
+          <p class="small-muted" style="margin:0;">
+            After importing, the master table mapping is stored in
+            <code>prism_master_wor_meta</code>. Next you can run the project/WBS population
+            routines to create the application-specific tables from this master.
+          </p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+{% if preview_rows %}
+  <div style="margin-top:22px;">
+    <h3 style="margin:8px 0 12px 0;">Preview (first {{ preview_rows|length }} rows)</h3>
+    <div style="overflow:auto;border:1px solid #e2e8f0;border-radius:8px; max-height:420px;">
+      <table style="min-width:1000px; width:100%; border-collapse:collapse; font-size:14px;">
+        <thead>
+          <tr style="background:#f1f5f9; color:#1e293b; text-align:left;">
+            {% for h in preview_headers %}
+              <th style="padding:10px 12px; font-weight:600; border-bottom:2px solid #cbd5e1; white-space:nowrap;">
+                {{ h }}
+              </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview_rows %}
+            <tr style="border-bottom:1px solid #f1f5f9;">
+              {% for cell in row %}
+                <td style="padding:8px 12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px;">
+                  {{ cell }}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endif %}
+
+
+
+</div>
+{% endblock %}

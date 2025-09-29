@@ -75,11 +75,13 @@ MENU_TREE = [
         "key": "settings",
         "title": "Settings",
         "url": "#",
-        "roles": ["ADMIN"],
+        "roles": ["ADMIN","PDL"],
         "submenus": [
-            {"key": "ldap", "title": "LDAP Configuration", "url": "#", "roles": ["ADMIN"]},
-            {"key": "system", "title": "System Config", "url": "#", "roles": ["ADMIN"]},
+            {"key": "import_master", "title": "Import Master", "url": reverse_lazy("settings:import_master"), "roles": ["ADMIN","PDL"]},
+            {"key": "ldap", "title": "LDAP Configuration", "url": "#", "roles": ["ADMIN","PDL"]},
+            {"key": "system", "title": "System Config", "url": "#", "roles": ["ADMIN","PDL"]},
         ],
+
     },
     {
         "key": "admin",
