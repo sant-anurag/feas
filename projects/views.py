@@ -56,23 +56,58 @@ def get_connection():
     )
 
 
-def _ensure_user_from_ldap(request,samaccountname):
+def _ensure_user_from_ldap(request, samaccountname):
+    """
+    Ensure a 'users' row exists for the given LDAP identifier (username or email).
+    Returns the users.id (int) for the row (create if missing).
+
+    Behavior:
+      - If a users row already has ldap_id == samaccountname or username == samaccountname or email == samaccountname -> return it
+      - Else insert a new users row:
+          username = part before '@' if samaccountname looks like an email, else samaccountname
+          ldap_id = samaccountname (store canonical identifier)
+          email = samaccountname if it looks like an email, else NULL
+    """
     if not samaccountname:
         return None
-    sam = request.session.get("ldap_username")
+
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        cur.execute("SELECT id FROM users WHERE ldap_id = %s OR username = %s LIMIT 1", (sam, sam))
+        # try to find existing by ldap_id, username or email
+        cur.execute(
+            "SELECT id, ldap_id, username, email FROM users WHERE ldap_id = %s OR username = %s OR email = %s LIMIT 1",
+            (samaccountname, samaccountname, samaccountname)
+        )
         row = cur.fetchone()
         if row:
             return row["id"]
+
+        # Prepare insert values
+        username_val = samaccountname
+        email_val = None
+        if "@" in samaccountname:
+            # username part before @
+            username_val = samaccountname.split("@", 1)[0]
+            email_val = samaccountname
+
         ins = conn.cursor()
-        ins.execute("INSERT INTO users (username, ldap_id) VALUES (%s, %s)", (sam, sam))
-        conn.commit()
-        nid = ins.lastrowid
-        ins.close()
-        return nid
+        try:
+            ins.execute(
+                "INSERT INTO users (username, ldap_id, email, created_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)",
+                (username_val, samaccountname, email_val)
+            )
+            conn.commit()
+            new_id = ins.lastrowid
+        finally:
+            try:
+                ins.close()
+            except Exception:
+                pass
+        return new_id
+    except Exception:
+        logger.exception("Error in _ensure_user_from_ldap for identifier: %s", samaccountname)
+        return None
     finally:
         try:
             cur.close()
@@ -83,6 +118,36 @@ def _ensure_user_from_ldap(request,samaccountname):
         except Exception:
             pass
 
+
+def _get_local_ldap_entry(identifier):
+    """
+    Look up the local ldap_directory table using email, username or cn.
+    Returns a dict with keys (username, email, cn, title) or None.
+    """
+    if not identifier:
+        return None
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT username, email, cn, title
+            FROM ldap_directory
+            WHERE email = %s OR username = %s OR cn = %s
+            LIMIT 1
+        """, (identifier, identifier, identifier))
+        return cur.fetchone()
+    except Exception:
+        logger.exception("Error reading ldap_directory for %s", identifier)
+        return None
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 def _fetch_users():
     conn = get_connection()
@@ -348,6 +413,96 @@ def edit_domain(request, domain_id):
 
 @require_GET
 def ldap_search(request):
+    """
+    AJAX endpoint used by projects/actions.js autocomplete.
+
+    - Expects query param 'q'
+    - Requires minimum 3 characters to search (client enforces this too)
+    - First looks up the local `ldap_directory` table (username, email, cn, title)
+    - Returns JSON: {"results": [ {sAMAccountName, mail, cn, title}, ... ] }
+    - If local table returns no rows, falls back to live LDAP via accounts.ldap_utils (if available)
+    """
+    q = (request.GET.get("q") or "").strip()
+    if len(q) < 3:
+        # Return empty results for short queries (client requires min 3 chars)
+        return JsonResponse({"results": []})
+
+    results = []
+    try:
+        # 1) Query local ldap_directory table (preferred)
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            like = f"%{q}%"
+            cur.execute("""
+                SELECT username AS sAMAccountName,
+                       COALESCE(email, '') AS mail,
+                       COALESCE(cn, username) AS cn,
+                       COALESCE(title, '') AS title
+                FROM ldap_directory
+                WHERE username LIKE %s OR email LIKE %s OR cn LIKE %s
+                ORDER BY username LIMIT 40
+            """, (like, like, like))
+            rows = cur.fetchall() or []
+            for r in rows:
+                results.append({
+                    "sAMAccountName": r.get("sAMAccountName") or "",
+                    "mail": r.get("mail") or "",
+                    "cn": r.get("cn") or "",
+                    "title": r.get("title") or "",
+                })
+            print("Results from local ldap_directory:", results)
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        # 2) If no local results, optionally fall back to live LDAP (keeps previous behavior)
+        if not results:
+            try:
+                from accounts import ldap_utils
+                username = request.session.get("ldap_username")
+                password = request.session.get("ldap_password")
+                # if no session creds, skip live LDAP
+                if username and password:
+                    conn_ldap = ldap_utils._get_ldap_connection(username, password)
+                    base_dn = getattr(settings, "LDAP_BASE_DN", "")
+                    conn_ldap.search(
+                        search_base=base_dn,
+                        search_filter=f"(|(sAMAccountName=*{q}*)(cn=*{q}*)(mail=*{q}*))",
+                        search_scope='SUBTREE',
+                        attributes=['sAMAccountName', 'mail', 'cn', 'title']
+                    )
+                    for e in conn_ldap.entries:
+                        results.append({
+                            "sAMAccountName": str(getattr(e, 'sAMAccountName', '')) or "",
+                            "mail": str(getattr(e, 'mail', '')) or "",
+                            "cn": str(getattr(e, 'cn', '')) or "",
+                            "title": str(getattr(e, 'title', '')) or "",
+                        })
+                    print("Results from live LDAP:", results)
+                    try:
+                        conn_ldap.unbind()
+                    except Exception:
+                        pass
+            except Exception as ex:
+                logger.warning("Live LDAP fallback failed or not available: %s", ex)
+
+    except Exception as ex:
+        # In case of unexpected DB failure, log and return empty list (avoid breaking UI)
+        logger.exception("ldap_search: unexpected error: %s", ex)
+        return JsonResponse({"results": []}, status=200)
+
+    return JsonResponse({"results": results})
+
+
+@require_GET
+def ldap_search_server(request):
     q = (request.GET.get("q") or "").strip()
     if len(q) < 1:
         return JsonResponse({"results": []})
@@ -588,68 +743,102 @@ def edit_project(request, project_id=None):
         pm_name_val = None
 
         # If pdl_sel present, canonicalize and create users row (store as id).
+        # -------------------------
+        # PDL handling - prefer local ldap_directory, ensure users row, populate pdl_name
+        # -------------------------
+        pdl_user_id_db = None
+        pdl_name_val = None
         if pdl_sel:
-            try:
-                # prefer creating/looking up via ldap canonical identifier
-                pdl_user_id_db = _ensure_user_from_ldap(request, pdl_sel)
-            except Exception:
-                logger.exception("Failed to ensure PDL user for %s", pdl_sel)
-                pdl_user_id_db = None
-
-            # attempt to read CN from LDAP
-            try:
-                user_entry = None
+            # Try local LDAP directory first (fast, avoids live LDAP)
+            local = _get_local_ldap_entry(pdl_sel)
+            if local:
+                # create/ensure a users row; store numeric users.id in projects.pdl_user_id (preserves existing joins)
+                canonical_for_users = local.get("email") or local.get("username") or pdl_sel
                 try:
-                    user_entry = get_user_entry_by_username(pdl_sel, username_password_for_conn=creds)
+                    pdl_user_id_db = _ensure_user_from_ldap(request, canonical_for_users)
                 except Exception:
-                    logger.exception("LDAP lookup for PDL failed for %s", pdl_sel)
-                    user_entry = None
+                    logger.exception("Failed to ensure users row for PDL %s", canonical_for_users)
+                    pdl_user_id_db = None
+                # set the display name from local cn (preferred)
+                pdl_name_val = local.get("cn") or local.get("username")
+            else:
+                # no local match -> fallback: ensure users row using the posted identifier (may be email or samaccountname)
+                try:
+                    pdl_user_id_db = _ensure_user_from_ldap(request, pdl_sel)
+                except Exception:
+                    logger.exception("Failed to ensure users row for PDL (fallback) %s", pdl_sel)
+                    pdl_user_id_db = None
 
-                if user_entry:
-                    # try common name extraction
-                    if hasattr(user_entry, "entry_attributes_as_dict"):
-                        attrs = user_entry.entry_attributes_as_dict
-                        pdl_name_val = (attrs.get("cn") or attrs.get("displayName") or attrs.get("name") or None)
-                        if isinstance(pdl_name_val, (list, tuple)):
-                            pdl_name_val = pdl_name_val[0] if pdl_name_val else None
-                    elif isinstance(user_entry, dict):
-                        pdl_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get("name")
-                    else:
-                        pdl_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName", None)
-                    if pdl_name_val:
-                        pdl_name_val = str(pdl_name_val).strip()
-            except Exception:
-                logger.exception("Error extracting PDL cn for %s", pdl_sel)
+                # attempt live LDAP only to get CN for display (optional, only if session creds available)
+                try:
+                    if creds and creds[0] and creds[1]:
+                        user_entry = None
+                        try:
+                            user_entry = get_user_entry_by_username(pdl_sel, username_password_for_conn=creds)
+                        except Exception:
+                            user_entry = None
+                        if user_entry:
+                            if hasattr(user_entry, "entry_attributes_as_dict"):
+                                attrs = user_entry.entry_attributes_as_dict
+                                pdl_name_val = attrs.get("cn") or attrs.get("displayName") or attrs.get("name")
+                                if isinstance(pdl_name_val, (list, tuple)):
+                                    pdl_name_val = pdl_name_val[0] if pdl_name_val else None
+                            elif isinstance(user_entry, dict):
+                                pdl_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get(
+                                    "name")
+                            else:
+                                pdl_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName",
+                                                                                          None)
+                            if pdl_name_val:
+                                pdl_name_val = str(pdl_name_val).strip()
+                except Exception:
+                    logger.exception("Live LDAP lookup for PDL failed for %s", pdl_sel)
 
+        # -------------------------
+        # PM handling - prefer local ldap_directory, ensure users row, populate pm_name
+        # -------------------------
+        pm_user_id_db = None
+        pm_name_val = None
         if pm_sel:
-            try:
-                pm_user_id_db = _ensure_user_from_ldap(request, pm_sel)
-            except Exception:
-                logger.exception("Failed to ensure PM user for %s", pm_sel)
-                pm_user_id_db = None
-
-            try:
-                user_entry = None
+            local = _get_local_ldap_entry(pm_sel)
+            if local:
+                canonical_for_users = local.get("email") or local.get("username") or pm_sel
                 try:
-                    user_entry = get_user_entry_by_username(pm_sel, username_password_for_conn=creds)
+                    pm_user_id_db = _ensure_user_from_ldap(request, canonical_for_users)
                 except Exception:
-                    logger.exception("LDAP lookup for PM failed for %s", pm_sel)
-                    user_entry = None
+                    logger.exception("Failed to ensure users row for PM %s", canonical_for_users)
+                    pm_user_id_db = None
+                pm_name_val = local.get("cn") or local.get("username")
+            else:
+                try:
+                    pm_user_id_db = _ensure_user_from_ldap(request, pm_sel)
+                except Exception:
+                    logger.exception("Failed to ensure users row for PM (fallback) %s", pm_sel)
+                    pm_user_id_db = None
 
-                if user_entry:
-                    if hasattr(user_entry, "entry_attributes_as_dict"):
-                        attrs = user_entry.entry_attributes_as_dict
-                        pm_name_val = (attrs.get("cn") or attrs.get("displayName") or attrs.get("name") or None)
-                        if isinstance(pm_name_val, (list, tuple)):
-                            pm_name_val = pm_name_val[0] if pm_name_val else None
-                    elif isinstance(user_entry, dict):
-                        pm_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get("name")
-                    else:
-                        pm_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName", None)
-                    if pm_name_val:
-                        pm_name_val = str(pm_name_val).strip()
-            except Exception:
-                logger.exception("Error extracting PM cn for %s", pm_sel)
+                try:
+                    if creds and creds[0] and creds[1]:
+                        user_entry = None
+                        try:
+                            user_entry = get_user_entry_by_username(pm_sel, username_password_for_conn=creds)
+                        except Exception:
+                            user_entry = None
+                        if user_entry:
+                            if hasattr(user_entry, "entry_attributes_as_dict"):
+                                attrs = user_entry.entry_attributes_as_dict
+                                pm_name_val = attrs.get("cn") or attrs.get("displayName") or attrs.get("name")
+                                if isinstance(pm_name_val, (list, tuple)):
+                                    pm_name_val = pm_name_val[0] if pm_name_val else None
+                            elif isinstance(user_entry, dict):
+                                pm_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get(
+                                    "name")
+                            else:
+                                pm_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName",
+                                                                                         None)
+                            if pm_name_val:
+                                pm_name_val = str(pm_name_val).strip()
+                except Exception:
+                    logger.exception("Live LDAP lookup for PM failed for %s", pm_sel)
 
         # persist update to projects table
         try:
