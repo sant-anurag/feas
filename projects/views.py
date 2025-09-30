@@ -13,6 +13,12 @@ from django.views.decorators.http import require_GET, require_POST, require_http
 
 import mysql.connector
 from mysql.connector import Error, IntegrityError
+from math import ceil
+from django.shortcuts import render
+from django.urls import reverse
+from django.utils.http import urlencode
+
+PAGE_SIZE = 10
 # -------------------------
 # LDAP helpers (use your ldap_utils)
 # -------------------------
@@ -168,21 +174,51 @@ def _fetch_project(project_id):
     finally:
         cur.close(); conn.close()
 
+# projects/views.py
+from django.shortcuts import render
 
-@require_GET
 def project_list(request):
+    """
+    Return all projects (no server-side pagination).
+    Frontend will paginate client-side (10 per page).
+    """
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
+    projects = []
     try:
         cur.execute("""
-            SELECT p.id, p.name, p.description, p.start_date, p.end_date, u.username as pdl_username
-            FROM projects p
-            LEFT JOIN users u ON p.pdl_user_id = u.id
-            ORDER BY p.created_at DESC
+            SELECT id, name, oem_name, description, start_date, end_date,
+                   pdl_user_id, pdl_name, pm_user_id, pm_name, created_at
+            FROM projects
+            ORDER BY created_at DESC
         """)
-        projects = cur.fetchall()
+        rows = cur.fetchall() or []
+        # convert date objects to strings (ISO or friendly) for safe JSON serialization in template
+        for r in rows:
+            projects.append({
+                "id": r.get("id"),
+                "name": r.get("name") or "",
+                "oem_name": r.get("oem_name") or "",
+                "description": r.get("description") or "",
+                "start_date": (r.get("start_date").isoformat() if r.get("start_date") else None),
+                "end_date": (r.get("end_date").isoformat() if r.get("end_date") else None),
+                "pdl_user_id": r.get("pdl_user_id") or "",
+                "pdl_name": r.get("pdl_name") or "",
+                "pm_user_id": r.get("pm_user_id") or "",
+                "pm_name": r.get("pm_name") or "",
+                "created_at": (r.get("created_at").isoformat() if r.get("created_at") else None),
+            })
     finally:
-        cur.close(); conn.close()
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+    print("Fetched projects:", projects)
+    # pass projects list to template
     return render(request, "projects/project_list.html", {"projects": projects})
 
 
@@ -576,33 +612,6 @@ def _get_project_coe_ids(project_id):
         cur.close(); conn.close()
 
 
-@require_GET
-def project_list(request):
-    conn = get_connection()
-    cur = conn.cursor(dictionary=True)
-    try:
-        cur.execute("""
-            SELECT p.id, p.name, p.description, p.start_date, p.end_date, u.username as pdl_username
-            FROM projects p
-            LEFT JOIN users u ON p.pdl_user_id = u.id
-            ORDER BY p.created_at DESC
-        """)
-        projects = cur.fetchall()
-    finally:
-        cur.close(); conn.close()
-    # compute mapped counts
-    conn = get_connection()
-    cur = conn.cursor(dictionary=True)
-    try:
-        cur.execute("SELECT project_id, COUNT(*) as cnt FROM project_coes GROUP BY project_id")
-        rows = cur.fetchall()
-        counts = {r['project_id']: r['cnt'] for r in rows} if rows else {}
-    finally:
-        cur.close(); conn.close()
-    for p in projects:
-        p['mapped_coe_count'] = counts.get(p['id'], 0)
-    return render(request, "projects/project_list.html", {"projects": projects})
-
 def create_project(request):
     if request.method == "POST":
         name = (request.POST.get("name") or "").strip()
@@ -629,7 +638,22 @@ def create_project(request):
 
         pdl_user_id = None
         if pdl_username:
-            pdl_user_id = _ensure_user_from_ldap(request,pdl_username)
+            # prefer local ldap_directory email; otherwise use the supplied identifier
+            pdl_user_id = None
+            if pdl_username:
+                local = _get_local_ldap_entry(pdl_username)
+                if local:
+                    pdl_user_id = local.get("email") or local.get("username")
+                    try:
+                        _ensure_user_from_ldap(request, pdl_user_id)
+                    except Exception:
+                        logger.exception("Failed to ensure users row for pdl %s", pdl_user_id)
+                else:
+                    pdl_user_id = pdl_username if "@" in pdl_username else pdl_username
+                    try:
+                        _ensure_user_from_ldap(request, pdl_username)
+                    except Exception:
+                        logger.exception("Failed to ensure users row for pdl (fallback) %s", pdl_username)
 
         conn = get_connection()
         cur = conn.cursor()
@@ -742,36 +766,35 @@ def edit_project(request, project_id=None):
         pdl_name_val = None
         pm_name_val = None
 
-        # If pdl_sel present, canonicalize and create users row (store as id).
         # -------------------------
-        # PDL handling - prefer local ldap_directory, ensure users row, populate pdl_name
+        # PDL handling - prefer local ldap_directory.email (store email string in projects.pdl_user_id)
         # -------------------------
-        pdl_user_id_db = None
+        pdl_user_id_db = None   # will hold the email string (or fallback identifier)
         pdl_name_val = None
         if pdl_sel:
-            # Try local LDAP directory first (fast, avoids live LDAP)
+            # first try local ldap_directory (preferred)
             local = _get_local_ldap_entry(pdl_sel)
             if local:
-                # create/ensure a users row; store numeric users.id in projects.pdl_user_id (preserves existing joins)
-                canonical_for_users = local.get("email") or local.get("username") or pdl_sel
-                try:
-                    pdl_user_id_db = _ensure_user_from_ldap(request, canonical_for_users)
-                except Exception:
-                    logger.exception("Failed to ensure users row for PDL %s", canonical_for_users)
-                    pdl_user_id_db = None
-                # set the display name from local cn (preferred)
+                # prefer email from local directory
+                pdl_user_id_db = local.get("email") or local.get("username") or pdl_sel
                 pdl_name_val = local.get("cn") or local.get("username")
-            else:
-                # no local match -> fallback: ensure users row using the posted identifier (may be email or samaccountname)
+                # ensure users row exists (do not use its id for saving - we store email string)
                 try:
-                    pdl_user_id_db = _ensure_user_from_ldap(request, pdl_sel)
+                    _ensure_user_from_ldap(request, pdl_user_id_db)
                 except Exception:
-                    logger.exception("Failed to ensure users row for PDL (fallback) %s", pdl_sel)
-                    pdl_user_id_db = None
+                    logger.exception("Failed to ensure users row for PDL %s", pdl_user_id_db)
+            else:
+                # fallback: if supplied value looks like an email, use it; else use supplied identifier as-is
+                pdl_user_id_db = pdl_sel if "@" in pdl_sel else pdl_sel
+                try:
+                    _ensure_user_from_ldap(request, pdl_sel)
+                except Exception:
+                    logger.exception("Failed to ensure users row for PDL fallback %s", pdl_sel)
 
-                # attempt live LDAP only to get CN for display (optional, only if session creds available)
+                # optional: attempt live LDAP only to fetch CN if you still want display name filled when local misses
                 try:
                     if creds and creds[0] and creds[1]:
+                        from accounts import ldap_utils
                         user_entry = None
                         try:
                             user_entry = get_user_entry_by_username(pdl_sel, username_password_for_conn=creds)
@@ -784,40 +807,39 @@ def edit_project(request, project_id=None):
                                 if isinstance(pdl_name_val, (list, tuple)):
                                     pdl_name_val = pdl_name_val[0] if pdl_name_val else None
                             elif isinstance(user_entry, dict):
-                                pdl_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get(
-                                    "name")
+                                pdl_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get("name")
                             else:
-                                pdl_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName",
-                                                                                          None)
+                                pdl_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName", None)
                             if pdl_name_val:
                                 pdl_name_val = str(pdl_name_val).strip()
                 except Exception:
                     logger.exception("Live LDAP lookup for PDL failed for %s", pdl_sel)
 
+
         # -------------------------
-        # PM handling - prefer local ldap_directory, ensure users row, populate pm_name
+        # PM handling - prefer local ldap_directory.email (store email string in projects.pm_user_id)
         # -------------------------
         pm_user_id_db = None
         pm_name_val = None
         if pm_sel:
             local = _get_local_ldap_entry(pm_sel)
             if local:
-                canonical_for_users = local.get("email") or local.get("username") or pm_sel
-                try:
-                    pm_user_id_db = _ensure_user_from_ldap(request, canonical_for_users)
-                except Exception:
-                    logger.exception("Failed to ensure users row for PM %s", canonical_for_users)
-                    pm_user_id_db = None
+                pm_user_id_db = local.get("email") or local.get("username") or pm_sel
                 pm_name_val = local.get("cn") or local.get("username")
-            else:
                 try:
-                    pm_user_id_db = _ensure_user_from_ldap(request, pm_sel)
+                    _ensure_user_from_ldap(request, pm_user_id_db)
                 except Exception:
-                    logger.exception("Failed to ensure users row for PM (fallback) %s", pm_sel)
-                    pm_user_id_db = None
+                    logger.exception("Failed to ensure users row for PM %s", pm_user_id_db)
+            else:
+                pm_user_id_db = pm_sel if "@" in pm_sel else pm_sel
+                try:
+                    _ensure_user_from_ldap(request, pm_sel)
+                except Exception:
+                    logger.exception("Failed to ensure users row for PM fallback %s", pm_sel)
 
                 try:
                     if creds and creds[0] and creds[1]:
+                        from accounts import ldap_utils
                         user_entry = None
                         try:
                             user_entry = get_user_entry_by_username(pm_sel, username_password_for_conn=creds)
@@ -830,15 +852,14 @@ def edit_project(request, project_id=None):
                                 if isinstance(pm_name_val, (list, tuple)):
                                     pm_name_val = pm_name_val[0] if pm_name_val else None
                             elif isinstance(user_entry, dict):
-                                pm_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get(
-                                    "name")
+                                pm_name_val = user_entry.get("cn") or user_entry.get("displayName") or user_entry.get("name")
                             else:
-                                pm_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName",
-                                                                                         None)
+                                pm_name_val = getattr(user_entry, "cn", None) or getattr(user_entry, "displayName", None)
                             if pm_name_val:
                                 pm_name_val = str(pm_name_val).strip()
                 except Exception:
                     logger.exception("Live LDAP lookup for PM failed for %s", pm_sel)
+
 
         # persist update to projects table
         try:

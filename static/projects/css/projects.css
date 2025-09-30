@@ -1,327 +1,392 @@
-/* ========= PROJECTS MODULE STYLES ========= */
-/* This file contains the project module base styles including the create form.
-   Updated to visually match the upgraded modal styles above. */
+/* projects.css — Redesigned professional UI
+   Use: replace existing file content with this.
+*/
 
-/* Panel (card) base */
-.panel {
-  background: #fff;
-  border-radius: 14px;
-  padding: 26px;
-  box-shadow: 0 8px 24px rgba(2,6,23,0.06);
-  border: 1px solid rgba(10,30,80,0.04);
+/* =========================
+   Design tokens
+   ========================= */
+:root{
+  --bg-page: #f6f8fb;            /* page background */
+  --card-bg: #ffffff;            /* card background */
+  --muted: #64748b;              /* secondary text */
+  --text-primary: #0f1724;       /* main text */
+  --accent: #2157ff;             /* primary action color */
+  --accent-600: #1d46e6;
+  --accent-400: #3b6dff;
+  --danger: #e53935;
+  --surface: #edf2fb;            /* subtle surface */
+  --border: #e6eef7;
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --shadow-soft: 0 8px 24px rgba(15, 23, 36, 0.06);
+  --shadow-sm: 0 3px 10px rgba(15, 23, 36, 0.04);
+  --max-width: 1400px;
+  --grid-gap: 32px;
+  --font-sans: Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, system-ui, -apple-system;
 }
 
-/* Header */
-.panel h2 {
-  margin: 0 0 18px 0;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--accent);
+/* =========================
+   Global / Layout
+   ========================= */
+html,body{
+  height:100%;
+  margin:0;
+  padding:0;
+  background:var(--bg-page);
+  font-family:var(--font-sans);
+  color:var(--text-primary);
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  font-size:15px;
+  line-height:1.45;
 }
 
-/* Muted helper text */
-.panel .muted {
-  font-size: 14px;
-  color: var(--text-muted);
+/* A neutral container for page content */
+.page-shell{
+  width:100%;
+  max-width:var(--max-width);
+  margin:28px auto;
+  padding: 0 26px;
+  box-sizing:border-box;
 }
 
-/* ===== Project List ===== */
-.project-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
+/* Main grid: left form, right details */
+.inner-grid{
+  display:grid;
+  grid-template-columns: 1fr 420px;  /* left flexible, right fixed */
+  gap:var(--grid-gap);
+  align-items:start;
+  width:100%;
 }
 
-.project-table thead {
-  background: linear-gradient(90deg, #2563eb, #1e40af);
-  color: #fff;
+/* Responsive collapse under 980px */
+@media (max-width:980px){
+  .inner-grid{ grid-template-columns:1fr; gap:20px; }
+  .page-shell{ padding:0 16px; margin:18px auto; }
 }
 
-.project-table th {
-  padding: 12px 14px;
-  font-weight: 600;
-  text-align: left;
+/* =========================
+   Cards / Panels
+   ========================= */
+.card-elevated, .panel{
+  background:var(--card-bg);
+  border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-soft);
+  border:1px solid var(--border);
+  overflow:hidden;
 }
 
-.project-table td {
-  padding: 12px 14px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  vertical-align: top;
-  color: var(--text-dark);
+/* Consistent card header */
+.card-header{
+  padding:20px 22px;
+  border-bottom:1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+}
+.card-header h2, .card-header h3{
+  margin:0;
+  font-size:1.15rem;
+  font-weight:800;
+  color:var(--text-primary);
 }
 
-.project-table tbody tr:hover {
-  background: rgba(37, 99, 235, 0.06);
-  transition: background 0.25s;
+/* Slightly larger padding for the editable column */
+.edit-column{
+  padding:26px;
+  box-sizing:border-box;
 }
 
-/* action buttons on list */
-.action-buttons {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+/* Right details card inner padding */
+.details-card{
+  padding:16px 18px;
 }
 
-.action-btn {
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  text-decoration: none;
-  display: inline-block;
+/* =========================
+   Forms
+   ========================= */
+.form-vertical{ padding:6px 0 6px 0; }
+.form-row{ margin-bottom:16px; }
+.field-label{
+  display:block;
+  font-weight:700;
+  color:var(--muted);
+  margin-bottom:8px;
+  font-size:0.92rem;
 }
 
-.action-btn.edit {
-  background: #fff;
-  border: 1px solid rgba(10, 30, 80, 0.15);
-  color: var(--accent);
-}
-
-.action-btn.edit:hover {
-  background: var(--accent);
-  color: #fff;
-}
-
-.action-btn.delete {
-  background: transparent;
-  border: 1px solid rgba(255, 80, 80, 0.25);
-  color: #e53935;
-}
-
-.action-btn.delete:hover {
-  background: #e53935;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(229, 57, 53, 0.25);
-}
-
-/* ===== Forms (Create/Edit Project) ===== */
-.form-grid {
-  display: grid;
-  gap: 20px;
-  max-width: 720px;
-}
-
-/* label block */
-.form-grid label {
-  font-weight: 600;
-  font-size: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  color: var(--text-dark);
-}
-
-/* small helper label title inside label */
-.label-title {
-  font-weight: 700;
-  font-size: 13px;
-  color: #0b1320;
-}
-
-/* Inputs / textarea / select base */
+/* Inputs & textarea */
 .form-input,
 .form-grid textarea,
-.form-grid select {
-  padding: 12px 14px;
-  border: 1px solid rgba(10, 30, 80, 0.12);
-  border-radius: 10px;
-  font-size: 15px;
-  background: #f9fafb;
-  color: var(--text-dark);
-  transition: border-color 0.18s, box-shadow 0.18s, background 0.22s;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-/* hover and focus */
-.form-input:hover,
-.form-grid textarea:hover,
-.form-grid select:hover {
+.form-grid select,
+textarea.form-input{
+  width:100%;
+  padding:11px 14px;
+  border-radius:var(--radius-md);
+  border:1px solid var(--border);
   background: #fff;
+  box-sizing:border-box;
+  color:var(--text-primary);
+  font-size:0.95rem;
+  transition: box-shadow .14s, border-color .14s, transform .08s;
 }
 
-.form-input:focus,
-.form-grid textarea:focus,
-.form-grid select:focus {
-  outline: none;
-  border-color: var(--accent);
-  background: #fff;
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+.form-input[readonly], .form-input.readonly{
+  background:#fbfdff;
+  color:var(--text-primary);
 }
 
-/* date fields grid */
-.form-dates {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+/* Focus */
+.form-input:focus, textarea.form-input:focus{
+  outline:none;
+  box-shadow:0 6px 20px rgba(33,87,255,0.12);
+  border-color:var(--accent-600);
 }
 
-/* form actions area */
-.form-actions {
-  display: flex;
-  gap: 14px;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
+/* Split inputs (two-column dates) */
+.form-split{ display:flex; gap:14px; }
+.form-split > div{ flex:1; }
 
-/* button styles */
-.btn {
-  padding: 12px 20px;
-  font-weight: 700;
-  font-size: 14px;
-  border-radius: 10px;
-  border: none;
-  cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
+/* textarea sizing */
+textarea.form-input{ min-height:110px; resize:vertical; }
 
-.btn.primary {
-  background: linear-gradient(90deg, #2563eb, #1e40af);
-  color: #fff;
-}
+/* Helper small muted text */
+.small-muted{ font-size:0.9rem; color:var(--muted); }
 
-.btn.primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 28px rgba(37, 99, 235, 0.18);
-}
+/* =========================
+   Buttons
+   ========================= */
+.form-actions{ display:flex; gap:12px; justify-content:flex-end; padding-top:6px; }
 
-.btn.secondary {
-  background: #fff;
-  border: 1px solid rgba(10, 30, 80, 0.12);
-  color: var(--text-dark);
-}
-
-.btn.secondary:hover {
-  background: #f1f5f9;
-}
-
-/* Smaller responsive tweaks */
-@media (max-width: 980px) {
-  .form-dates { grid-template-columns: 1fr; }
-  .create-panel { flex-basis: 100%; }
-  .actions-column { flex-basis: 100%; }
-}
-/* Modal overlay & panel */
-.modal-overlay {
-  position: fixed;
-  inset: 0; /* top:0; right:0; bottom:0; left:0 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(12, 22, 60, 0.32);
-  z-index: 1200;
-  padding: 24px;
-  box-sizing: border-box;
-}
-
-/* Keep modal-panel centered and responsive */
-.modal-panel {
-  position: relative;
-  width: min(1100px, 98%);
-  max-height: 86vh;
-  overflow: hidden;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 18px 40px rgba(12, 22, 60, 0.12);
-  padding: 20px 24px;
-  box-sizing: border-box;
-}
-
-/* close button */
-.modal-close {
-  position: absolute;
-  top: 12px;
-  left: 12px; /* user preferred left in screenshot */
-  border: 0;
-  background: #f3f4f6;
-  color: #111827;
-  width: 34px;
-  height: 34px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background .12s ease;
-}
-.modal-close:hover { background: #e6e9ef; }
-
-/* modal content area scrolls independently */
-.modal-content {
-  overflow: auto;
-  max-height: calc(86vh - 8px);
-  padding-right: 8px;
-}
-
-/* Profile header: avatar + summary */
-.profile-header {
-  display: grid;
-  grid-template-columns: 96px 1fr;
-  gap: 16px;
-  align-items: start;
-  margin-bottom: 10px;
-}
-.profile-avatar {
-  width: 96px;
-  height: 96px;
-  border-radius: 8px;
-  background: #eef3ff;
-  display:flex;
+.btn{
+  display:inline-flex;
   align-items:center;
-  justify-content:center;
+  gap:10px;
+  padding:10px 16px;
+  border-radius:10px;
   font-weight:700;
-  color:#0b3b93;
-  font-size:24px;
+  cursor:pointer;
+  border:1px solid transparent;
+  transition: transform .08s, box-shadow .12s, background .12s, opacity .12s;
+  text-decoration:none;
+  color:var(--text-primary);
+  background:transparent;
 }
-.profile-title { font-size:20px; font-weight:700; margin:0; }
-.profile-sub { margin:4px 0 0; color:#475569; font-size:14px; }
 
-/* key-value list */
-.kv-grid {
-  display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 8px 14px;
-  margin-top: 12px;
-  padding-top: 6px;
-  border-top: 1px solid #eef2ff;
+/* Primary */
+.btn-primary{
+  background:linear-gradient(90deg, var(--accent), var(--accent-600));
+  color:#fff;
+  border-color:transparent;
+  box-shadow:0 8px 32px rgba(33,87,255,0.12);
 }
-.kv-label { color:#334155; font-weight:600; }
-.kv-value { color:#0f172a; }
+.btn-primary:hover{ transform:translateY(-2px); }
 
-/* attributes JSON box */
-.attributes-box {
-  margin-top: 18px;
-  border: 1px solid #eef2ff;
+/* Outline button */
+.btn-outline{
+  background:#fff;
+  border-color:var(--border);
+  color:var(--accent);
+}
+.btn-outline:hover{ background:#f7f9ff; }
+
+/* Danger */
+.btn-danger{
+  background:var(--danger);
+  color:#fff;
+  border-color:transparent;
+}
+
+/* Disabled */
+.btn[disabled], .btn.disabled{ opacity:0.6; cursor:not-allowed; transform:none; }
+
+/* =========================
+   Messages
+   ========================= */
+.messages .msg{ padding:12px 14px; border-radius:10px; margin-bottom:12px; font-weight:700; font-size:0.95rem; }
+.messages .error{ background:#fff5f5; color:#9b1c1c; border:1px solid #ffd6d6; }
+.messages .success{ background:#f1fbf6; color:#064e3b; border:1px solid #d8f5e6; }
+
+/* =========================
+   Details card (right) — key/value list
+   ========================= */
+.details-grid{ display:grid; gap:12px; padding:6px 4px; }
+.kv{ display:flex; gap:12px; align-items:flex-start; padding:10px 6px; border-radius:8px; }
+.kv + .kv{ border-top:1px solid rgba(14,24,42,0.03); }
+
+/* label / value */
+.kv dt{ width:110px; font-weight:800; color:var(--accent-600); font-size:0.95rem; margin:0; }
+.kv dd{ margin:0; color:var(--text-primary); flex:1; font-size:0.95rem; }
+
+/* full width (description) */
+.kv.full{ display:block; }
+.kv.full dt{ display:block; margin-bottom:6px; color:var(--muted); font-weight:700; }
+.kv.full dd{ white-space:pre-wrap; color:var(--text-primary); background:var(--surface); padding:10px; border-radius:8px; }
+
+/* small muted email */
+.muted{ color:var(--muted); }
+
+/* mono style for program codes */
+.mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace; font-size:0.95rem; color:var(--text-primary); }
+
+/* =========================
+   Autocomplete suggestions
+   ========================= */
+.autocomplete-list{
+  max-height:240px;
+  overflow:auto;
+  border-radius:8px;
+  box-shadow:var(--shadow-sm);
+  z-index:60;
+  background:var(--card-bg);
+  border:1px solid var(--border);
+  margin-top:6px;
+}
+.autocomplete-item{
+  padding:10px 12px;
+  border-bottom:1px solid rgba(14,24,42,0.03);
+  cursor:pointer;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.autocomplete-item:last-child{ border-bottom:none; }
+.autocomplete-item .line1{ font-weight:700; color:var(--text-primary); font-size:0.95rem; }
+.autocomplete-item .line2{ color:var(--muted); font-size:0.86rem; }
+.autocomplete-item:hover, .autocomplete-item.active{ background:#f3f6ff; }
+
+/* =========================
+   Tables (project table)
+   ========================= */
+.project-table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+  background:var(--card-bg);
+  border-radius:10px;
+  overflow:hidden;
+  box-shadow:var(--shadow-sm);
+}
+.project-table thead th{
+  text-align:left;
+  background:linear-gradient(90deg, rgba(33,87,255,0.95), rgba(29,70,230,0.95));
+  color:#fff;
+  padding:12px 14px;
+  font-weight:700;
+  font-size:0.95rem;
+}
+.project-table td{
+  padding:12px 14px;
+  border-bottom:1px solid rgba(14,24,42,0.04);
+  color:var(--text-primary);
+  font-size:0.95rem;
+}
+.project-table tbody tr:hover{ background:#fbfdff; }
+
+/* action buttons for table */
+.action-buttons{ display:flex; gap:8px; justify-content:flex-end; }
+.action-btn{ padding:8px 12px; border-radius:8px; font-weight:700; border:1px solid transparent; cursor:pointer; }
+.action-btn.edit{ background:transparent; color:var(--accent); border:1px solid rgba(33,87,255,0.12); }
+.action-btn.delete{ background:transparent; color:var(--danger); border:1px solid rgba(229,57,53,0.08); }
+.action-btn:hover{ transform:translateY(-1px); }
+
+/* =========================
+   Modal / overlay (kept minimal)
+   ========================= */
+.modal-overlay{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(2,6,23,0.48); z-index:1200; }
+.modal-panel{ width:min(980px,96%); max-height:86vh; overflow:auto; background:var(--card-bg); border-radius:12px; box-shadow:0 20px 48px rgba(2,6,23,0.24); }
+
+/* =========================
+   Utility tweaks
+   ========================= */
+.text-muted{ color:var(--muted); }
+.flex{ display:flex; }
+.center{ display:flex; align-items:center; justify-content:center; }
+
+/* Hide legacy project actions (if present) */
+.actions-column, .actions-panel{ display:none !important; }
+
+/* Slightly wider right column on very large screens */
+@media (min-width:1600px){
+  .inner-grid{ grid-template-columns: 1fr 480px; gap:36px; }
+}
+
+/* keyboard focus accessibility */
+:focus{ outline: 3px solid rgba(33,87,255,0.12); outline-offset:2px; }
+
+/* ---------- Professional card / form header styles ---------- */
+/* Add after your existing .card-header rules */
+
+.card-header {
+  position: relative;
+  padding: 18px 22px;
+  padding-left: 36px;              /* space for the left accent */
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+  border-bottom: 1px solid rgba(14,24,42,0.04);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* vertical accent bar on the left */
+.card-header::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 40%;
+  min-height: 26px;
   border-radius: 6px;
-  padding: 12px;
-  background:#fafbfd;
+  background: linear-gradient(180deg, rgba(33,87,255,1), rgba(59,109,255,0.9));
+  box-shadow: 0 6px 18px rgba(33,87,255,0.08);
 }
-.attributes-box pre {
+
+/* Title styling */
+.card-header h2,
+.card-header h3 {
   margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
-  font-size: 12.5px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 46vh; /* leave space for header */
-  overflow: auto;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1;
+  letter-spacing: -0.02em;
 }
 
-/* make sure modal close button is visible above content */
-.modal-panel .modal-close { z-index: 5; }
-
-/* responsive tweaks */
-@media (max-width: 720px) {
-  .profile-header { grid-template-columns: 72px 1fr; gap: 12px; }
-  .profile-avatar { width:72px; height:72px; font-size:18px; }
-  .modal-panel { padding:14px; }
+/* Slightly larger title for main forms */
+.card-header h2 {
+  font-size: 1.20rem;     /* increase for presence */
 }
 
-/* keep the rest of the earlier project styles intact (if any) */
+/* Slightly smaller for subsection headers */
+.card-header h3 {
+  font-size: 1.00rem;
+}
+
+/* Optional subtitle or action area aligned to the right.
+   If you want an inline subtitle or small action (e.g. status or badge),
+   add <div class="card-subtitle"> in the template after the H2/H3. */
+.card-header .card-subtitle {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+
+/* If you want a small badge instead of subtitle:
+   <span class="card-badge">Draft</span> */
+.card-header .card-badge {
+  margin-left: auto;
+  background: rgba(33,87,255,0.10);
+  color: var(--accent-600);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-weight:700;
+  font-size:0.85rem;
+}
+
+/* Responsive: keep headers compact on small screens */
+@media (max-width: 980px) {
+  .card-header { padding-left: 20px; padding-right: 14px; }
+  .card-header::before { left: 12px; width:6px; }
+  .card-header h2 { font-size:1.05rem; }
+}

@@ -1,53 +1,268 @@
 {% extends "base.html" %}
 {% load static %}
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+{% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<div class="page-shell">
+  <div class="panel card-elevated" style="padding:0; overflow:visible;">
+    <header class="card-header" style="align-items:flex-start;">
+      <div>
+        <h2>Projects</h2>
+        <div class="muted" style="margin-top:6px; font-size:0.92rem;">Browse and edit projects</div>
+      </div>
+      <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+        <!-- New Project removed per request -->
+      </div>
+    </header>
 
-<div class="panel" style="padding:20px 22px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <div>
-      <h2 style="margin:0">Projects</h2>
-      <div class="muted" style="font-size:13px">List of projects — edit or delete when required</div>
-    </div>
-    <div>
-      <a href="{% url 'projects:create' %}" class="btn primary" style="text-decoration:none">＋ New Project</a>
-    </div>
-  </div>
+    <div style="padding:18px;">
+      <div style="display:flex; gap:12px; align-items:center; margin-bottom:12px;">
+        <input id="searchBox" class="form-input" placeholder="Search by project name / OEM / PDL..." style="max-width:420px;" />
+        <div class="muted" id="resultsInfo" style="margin-left:auto;"></div>
+      </div>
 
-  <div style="overflow:auto">
-    <table class="project-table" aria-describedby="projectsTable" style="width:100%;border-collapse:collapse">
-      <thead>
-        <tr>
-          <th style="padding:10px">Name</th>
-          <th style="padding:10px">Description</th>
-          <th style="padding:10px">Start Date</th>
-          <th style="padding:10px">End Date</th>
-          <th style="padding:10px">PDL</th>
-          <th style="padding:10px;width:140px;text-align:center">Mapped COEs</th>
-          <th style="padding:10px;width:140px">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="projectsTableBody">
-        {% for p in projects %}
-          <tr>
-            <td style="padding:10px">{{ p.name }}</td>
-            <td style="padding:10px;max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.description }}</td>
-            <td style="padding:10px">{{ p.start_date|date:"Y-m-d" }}</td>
-            <td style="padding:10px">{{ p.end_date|date:"Y-m-d" }}</td>
-            <td style="padding:10px">{{ p.pdl_username|default:"" }}</td>
-            <td style="padding:10px;text-align:center">{{ p.mapped_coe_count|default:0 }}</td>
-            <td style="padding:10px">
-              <a class="btn-light small" href="{% url 'projects:edit' p.id %}">Edit</a>
-              <a class="btn-light small danger" href="{% url 'projects:delete' p.id %}" onclick="return confirm('Delete this project? This action cannot be undone.')">Delete</a>
-            </td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="7" style="padding:18px;text-align:center">No projects found.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+      <div style="width:100%; overflow:auto;">
+        <table class="project-table" id="projectsTable" style="width:100%;">
+          <thead>
+            <tr>
+              <th style="padding:12px 14px; width:36%;">Name & OEM</th>
+              <th style="padding:12px 14px; width:30%;">Description</th>
+              <th style="padding:12px 14px; width:8%;">Start</th>
+              <th style="padding:12px 14px; width:8%;">End</th>
+              <th style="padding:12px 14px; width:8%;">PDL</th>
+              <th style="padding:12px 14px; width:8%;">PM</th>
+              <th style="padding:12px 14px; width:6%; text-align:center">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="projectsTableBody">
+            <!-- rows rendered by JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination controls -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:18px;">
+        <div class="muted" id="displayCount">Showing 0 of 0 projects</div>
+
+        <nav aria-label="Project list pagination">
+          <ul id="pagination" style="list-style:none; margin:0; padding:0; display:flex; gap:8px; align-items:center;"></ul>
+        </nav>
+      </div>
+    </div>
   </div>
 </div>
 
+{# <-- Correctly embed projects as JSON for safe JS consumption --> }
+{{ projects|json_script:"projects_data" }}
+
+{% block extra_js %}
+<script>
+(function(){
+  // client-side pagination config
+  const PAGE_SIZE = 10;
+
+  // Read projects JSON that Django produced via json_script
+  let projects = [];
+  try {
+    const container = document.getElementById("projects_data");
+    if (container) {
+      const raw = container.textContent || container.innerText || "[]";
+      projects = JSON.parse(raw);
+    } else {
+      console.warn("projects_data element not found; no projects will be displayed.");
+      projects = [];
+    }
+  } catch (e) {
+    console.error("Failed to parse projects JSON:", e);
+    projects = [];
+  }
+
+  // DOM refs
+  const tbody = document.getElementById("projectsTableBody");
+  const paginationEl = document.getElementById("pagination");
+  const displayCount = document.getElementById("displayCount");
+  const searchBox = document.getElementById("searchBox");
+
+  // Template for edit URL — replace /0/ with /<id>/ when building the link
+  const editUrlTemplate = "{% url 'projects:edit' 0 %}";
+
+  // Helpers
+  function formatDateIsoToReadable(iso){
+    if (!iso) return "—";
+    try {
+      // Date constructor can parse 'YYYY-MM-DD' in modern browsers
+      const d = new Date(iso);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+      // fallback parse YYYY-MM-DD
+      const parts = String(iso).split("-");
+      if (parts.length >= 3) {
+        const dt = new Date(parts[0], parts[1]-1, parts[2]);
+        if (!isNaN(dt.getTime())) {
+          return dt.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+      }
+      return iso;
+    } catch (e) {
+      return iso;
+    }
+  }
+
+  function buildEditUrl(id){
+    if (!editUrlTemplate) return "#";
+    if (editUrlTemplate.indexOf('/0/') !== -1) return editUrlTemplate.replace('/0/', '/' + id + '/');
+    // fallback - replace trailing 0
+    return editUrlTemplate.replace(/0(\/)?$/, id + "$1");
+  }
+
+  function escapeHtml(s){
+    if (s === undefined || s === null) return "";
+    return String(s).replace(/[&<>"'`=\/]/g, function (c) {
+      return {
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        '/': '&#x2F;', '`': '&#x60;', '=': '&#x3D;'
+      }[c];
+    });
+  }
+
+  function renderRow(item){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td style="padding:12px 14px; vertical-align:top;">
+        <div style="font-weight:800; color:var(--text-primary)">${escapeHtml(item.name)}</div>
+        <div class="muted" style="margin-top:6px;">${escapeHtml(item.oem_name || "—")}</div>
+      </td>
+      <td style="padding:12px 14px; vertical-align:top; max-width:760px;">
+        <div style="max-width:760px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(item.description || "")}</div>
+      </td>
+      <td style="padding:12px 14px; vertical-align:top;">${formatDateIsoToReadable(item.start_date)}</td>
+      <td style="padding:12px 14px; vertical-align:top;">${formatDateIsoToReadable(item.end_date)}</td>
+      <td style="padding:12px 14px; vertical-align:top;">
+        ${ item.pdl_name ? `<div style="font-weight:700;">${escapeHtml(item.pdl_name)}</div><div class="muted" style="font-size:0.86rem;">&lt;${escapeHtml(item.pdl_user_id||"")}&gt;</div>` :
+                         (item.pdl_user_id ? `<div class="muted small">${escapeHtml(item.pdl_user_id)}</div>` : `<div class="muted small">—</div>`) }
+      </td>
+      <td style="padding:12px 14px; vertical-align:top;">
+        ${ item.pm_name ? `<div style="font-weight:700;">${escapeHtml(item.pm_name)}</div><div class="muted" style="font-size:0.86rem;">&lt;${escapeHtml(item.pm_user_id||"")}&gt;</div>` :
+                         (item.pm_user_id ? `<div class="muted small">${escapeHtml(item.pm_user_id)}</div>` : `<div class="muted small">—</div>`) }
+      </td>
+      <td style="padding:12px 14px; text-align:center; vertical-align:top;">
+        <div class="action-buttons" style="justify-content:center;">
+          <a class="action-btn edit" href="${buildEditUrl(item.id)}">Edit</a>
+        </div>
+      </td>
+    `;
+    return tr;
+  }
+
+  // Search/filter logic
+  let filtered = projects.slice();
+  function applyFilter(q){
+    q = (q || "").trim().toLowerCase();
+    if (!q) { filtered = projects.slice(); return; }
+    filtered = projects.filter(p => {
+      return (p.name || "").toLowerCase().includes(q)
+          || (p.oem_name || "").toLowerCase().includes(q)
+          || (p.pdl_name || "").toLowerCase().includes(q)
+          || (p.pm_name || "").toLowerCase().includes(q)
+          || (p.pdl_user_id || "").toLowerCase().includes(q)
+          || (p.pm_user_id || "").toLowerCase().includes(q)
+          || (p.description || "").toLowerCase().includes(q);
+    });
+  }
+
+  // Render a specific page (1-based)
+  function renderPage(pageNum){
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (pageNum < 1) pageNum = 1;
+    if (pageNum > totalPages) pageNum = totalPages;
+
+    const startIdx = (pageNum - 1) * PAGE_SIZE;
+    const pageItems = filtered.slice(startIdx, startIdx + PAGE_SIZE);
+
+    tbody.innerHTML = "";
+    for (const it of pageItems) tbody.appendChild(renderRow(it));
+
+    // show counts: showing X - Y of total
+    const showingFrom = total === 0 ? 0 : (startIdx + 1);
+    const showingTo = total === 0 ? 0 : (startIdx + pageItems.length);
+    displayCount.innerHTML = `Showing <strong>${showingFrom}</strong> to <strong>${showingTo}</strong> of <strong>${total}</strong> projects`;
+
+    renderPaginationControls(pageNum, totalPages);
+    // scroll to table top (good UX)
+    const tableTop = document.getElementById("projectsTable").getBoundingClientRect().top + window.scrollY - 80;
+    window.scrollTo({ top: tableTop, behavior: 'smooth' });
+  }
+
+  function renderPaginationControls(current, totalPages){
+    paginationEl.innerHTML = "";
+
+    // Prev
+    const liPrev = document.createElement("li");
+    if (current > 1) {
+      liPrev.innerHTML = `<a class="btn btn-outline" href="#" data-action="prev">← Prev</a>`;
+    } else {
+      liPrev.innerHTML = `<span class="btn btn-outline disabled">← Prev</span>`;
+    }
+    paginationEl.appendChild(liPrev);
+
+    // pages window (max 7)
+    const windowSize = 7;
+    let start = Math.max(1, current - Math.floor(windowSize/2));
+    let end = Math.min(totalPages, start + windowSize - 1);
+    if (end - start + 1 < windowSize) start = Math.max(1, end - windowSize + 1);
+
+    for (let i = start; i <= end; i++){
+      const li = document.createElement("li");
+      if (i === current) {
+        li.innerHTML = `<span class="btn btn-primary" aria-current="page">${i}</span>`;
+      } else {
+        li.innerHTML = `<a class="btn btn-outline" href="#" data-page="${i}">${i}</a>`;
+      }
+      paginationEl.appendChild(li);
+    }
+
+    // Next
+    const liNext = document.createElement("li");
+    if (current < totalPages) {
+      liNext.innerHTML = `<a class="btn btn-outline" href="#" data-action="next">Next →</a>`;
+    } else {
+      liNext.innerHTML = `<span class="btn btn-outline disabled">Next →</span>`;
+    }
+    paginationEl.appendChild(liNext);
+
+    // attach events
+    paginationEl.querySelectorAll('a[data-page]').forEach(a => {
+      a.addEventListener('click', function(ev){
+        ev.preventDefault();
+        const p = parseInt(this.getAttribute('data-page'), 10);
+        renderPage(p);
+      });
+    });
+    const prevLink = paginationEl.querySelector('a[data-action="prev"]');
+    if (prevLink) prevLink.addEventListener('click', function(ev){ ev.preventDefault(); renderPage(current-1); });
+    const nextLink = paginationEl.querySelector('a[data-action="next"]');
+    if (nextLink) nextLink.addEventListener('click', function(ev){ ev.preventDefault(); renderPage(current+1); });
+  }
+
+  // Init
+  applyFilter(searchBox.value);
+  renderPage(1);
+
+  // Search debounce
+  let debounceTimer = null;
+  searchBox.addEventListener('input', function(){
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(function(){
+      applyFilter(searchBox.value);
+      renderPage(1);
+    }, 180);
+  });
+
+})();
+</script>
+{% endblock %}
 {% endblock %}
