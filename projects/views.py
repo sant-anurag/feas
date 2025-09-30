@@ -179,21 +179,65 @@ from django.shortcuts import render
 
 def project_list(request):
     """
-    Return all projects (no server-side pagination).
-    Frontend will paginate client-side (10 per page).
+    Return projects visible to the logged-in user:
+      - projects where p.pdl_user_id == ldap_username (email)
+      - OR projects linked (prism_wbs.project_id) where prism_wbs.creator matches converted CN
+
+    The view returns projects (as before) for client-side pagination.
     """
+    # Get session values
+    ldap_username = request.session.get("ldap_username")  # expected to be email or identifier
+    cn = request.session.get("cn")  # stored as "LASTNAME FirstName ..." (e.g. "DEO Sant Anurag")
+
+    # convert cn (LastName + FirstName...) to creator format (FirstName ... LastName)
+    creator_name = None
+    try:
+        if cn:
+            parts = str(cn).strip().split()
+            if len(parts) >= 2:
+                # move first token (last name) to the end
+                creator_name = " ".join(parts[1:] + parts[:1])
+            else:
+                creator_name = cn.strip()
+    except Exception:
+        creator_name = None
+
+    # If neither ldap_username nor creator_name present, return empty list (no projects)
+    if not ldap_username and not creator_name:
+        return render(request, "projects/project_list.html", {"projects": []})
+
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
     projects = []
     try:
-        cur.execute("""
-            SELECT id, name, oem_name, description, start_date, end_date,
-                   pdl_user_id, pdl_name, pm_user_id, pm_name, created_at
-            FROM projects
-            ORDER BY created_at DESC
-        """)
+        # Build a safe SQL that selects projects satisfying either condition.
+        # Use parameter placeholders for both ldap_username and creator_name.
+        # We use LEFT JOIN with prism_wbs and GROUP BY project to avoid duplicates.
+        sql = """
+            SELECT DISTINCT p.id, p.name, p.oem_name, p.description,
+                   p.start_date, p.end_date, p.pdl_user_id, p.pdl_name,
+                   p.pm_user_id, p.pm_name, p.created_at
+            FROM projects p
+            LEFT JOIN prism_wbs w ON w.project_id = p.id
+            WHERE 1=0
+        """
+        params = []
+
+        if ldap_username:
+            sql += " OR (p.pdl_user_id = %s)"
+            params.append(ldap_username)
+
+        if creator_name:
+            # match prism_wbs.creator exactly to converted creator name
+            sql += " OR (w.creator = %s)"
+            params.append(creator_name)
+
+        sql += " ORDER BY p.created_at DESC"
+
+        cur.execute(sql, tuple(params))
         rows = cur.fetchall() or []
-        # convert date objects to strings (ISO or friendly) for safe JSON serialization in template
+
+        # normalize rows for JSON consumption (dates -> ISO)
         for r in rows:
             projects.append({
                 "id": r.get("id"),
@@ -217,9 +261,9 @@ def project_list(request):
             conn.close()
         except Exception:
             pass
-    print("Fetched projects:", projects)
-    # pass projects list to template
+
     return render(request, "projects/project_list.html", {"projects": projects})
+
 
 
 def _get_all_coes():
