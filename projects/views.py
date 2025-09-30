@@ -1,22 +1,26 @@
+
 import logging
 import json
+from math import ceil
 from datetime import datetime
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection, transaction
-from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAllowed, HttpResponseForbidden
+from django.http import (
+    JsonResponse,
+    HttpResponseBadRequest,
+    HttpResponseNotAllowed,
+    HttpResponseForbidden,
+)
 from django.shortcuts import render, redirect
 from django.urls import reverse
+from django.utils.http import urlencode
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 import mysql.connector
 from mysql.connector import Error, IntegrityError
-from math import ceil
-from django.shortcuts import render
-from django.urls import reverse
-from django.utils.http import urlencode
 
 PAGE_SIZE = 10
 # -------------------------
@@ -1029,209 +1033,6 @@ def api_projects(request):
         p['mapped_coe_count'] = counts.get(p['id'], 0)
     return JsonResponse({"projects": projects})
 
-def allocations_monthly(request):
-    """
-    Monthly allocations page for a PDL.
-    Uses session ldap_username as canonical identity for PDL.
-    """
-    session_ldap = request.session.get("ldap_username")
-    session_pwd = request.session.get("ldap_password")
-    print("allocations_monthly - session_ldap:", session_ldap)
-    from datetime import date
-    # determine month_start
-    month_str = request.GET.get("month")
-    if month_str:
-        try:
-            month_start = datetime.strptime(month_str + "-01", "%Y-%m-%d").date()
-        except Exception:
-            month_start = date.today().replace(day=1)
-    else:
-        month_start = date.today().replace(day=1)
-
-    # project selection
-    project_id_param = request.GET.get("project_id")
-    try:
-        active_project_id = int(project_id_param) if project_id_param else 0
-    except Exception:
-        active_project_id = 0
-
-    # fetch projects where this session ldap is PDL
-    projects = []
-    try:
-        with connection.cursor() as cur:
-            cur.execute("""
-                SELECT p.id, p.name
-                FROM projects p
-                LEFT JOIN users u ON p.pdl_user_id = u.id
-                WHERE u.ldap_id = %s
-                ORDER BY p.name
-            """, [session_ldap])
-            projects = dictfetchall(cur)
-    except Exception as exc:
-        logger.exception("Error fetching projects for PDL: %s", exc)
-        projects = []
-
-    if not active_project_id and projects:
-        active_project_id = projects[0].get("id", 0)
-
-    if not active_project_id:
-        return render(request, "projects/monthly_allocations.html", {
-            "projects": projects,
-            "active_project_id": active_project_id,
-            "month_start": month_start,
-            "coes": [],
-            "domains_map": {},
-            "allocation_map": {},
-            "capacity_map": {},
-            "hours_available": HOURS_AVAILABLE_PER_MONTH,
-            "weekly_map": {},
-        })
-
-    # fetch all COEs (to show on right panel)
-    try:
-        with connection.cursor() as cur:
-            cur.execute("SELECT id, name FROM coes ORDER BY name")
-            coes = dictfetchall(cur)
-    except Exception as exc:
-        logger.exception("Error fetching COEs: %s", exc)
-        coes = []
-
-    coe_ids = [c["id"] for c in coes] if coes else []
-
-    # domains grouped by coe
-    domains_map = {}
-    if coe_ids:
-        try:
-            with connection.cursor() as cur:
-                cur.execute("SELECT id, name, coe_id FROM domains WHERE coe_id IN %s ORDER BY name", [tuple(coe_ids)])
-                doms = dictfetchall(cur)
-            for d in doms:
-                domains_map.setdefault(d["coe_id"], []).append({"id": d["id"], "name": d["name"]})
-        except Exception as exc:
-            logger.exception("Error fetching domains: %s", exc)
-            domains_map = {}
-
-    # fetch allocation_items for this project/month
-    allocation_map = {}
-    capacity_accumulator = {}
-    allocation_ids = []
-    try:
-        with connection.cursor() as cur:
-            cur.execute("""
-                SELECT ai.id AS item_id,
-                       ai.allocation_id,
-                       ai.coe_id,
-                       ai.domain_id,
-                       ai.user_ldap,
-                       u.username AS username,
-                       u.email AS email,
-                       COALESCE(ai.total_hours,0) as total_hours
-                FROM allocation_items ai
-                JOIN allocations a ON ai.allocation_id = a.id
-                LEFT JOIN users u ON ai.user_id = u.id
-                WHERE ai.project_id = %s
-                  AND a.month_start = %s
-                ORDER BY ai.coe_id
-            """, [active_project_id, month_start])
-            items = dictfetchall(cur)
-
-        for it in items:
-            coe_id = it.get("coe_id") or 0
-            ldap_val = (it.get("user_ldap") or "").strip()
-            total_hours = int(it.get("total_hours") or 0)
-            allocation_map.setdefault(coe_id, []).append({
-                "item_id": it.get("item_id"),
-                "allocation_id": it.get("allocation_id"),
-                "coe_id": coe_id,
-                "domain_id": it.get("domain_id"),
-                "user_ldap": ldap_val,
-                "username": it.get("username"),
-                "email": it.get("email"),
-                "total_hours": total_hours,
-                "w1": 0, "w2": 0, "w3": 0, "w4": 0,
-                "s1": "", "s2": "", "s3": "", "s4": ""
-            })
-            if ldap_val:
-                key = ldap_val.lower()
-                capacity_accumulator[key] = capacity_accumulator.get(key, 0) + total_hours
-            aid = it.get("allocation_id")
-            if aid and aid not in allocation_ids:
-                allocation_ids.append(aid)
-    except Exception as exc:
-        logger.exception("Error fetching allocation_items: %s", exc)
-        allocation_map = {}
-        capacity_accumulator = {}
-        allocation_ids = []
-
-    # weekly allocations attach
-    weekly_map = {}
-    if allocation_ids:
-        try:
-            with connection.cursor() as cur:
-                cur.execute("""
-                    SELECT allocation_id, week_number, percent, status
-                    FROM weekly_allocations
-                    WHERE allocation_id IN %s
-                """, [tuple(allocation_ids)])
-                for r in dictfetchall(cur):
-                    alloc = r["allocation_id"]
-                    wk = int(r["week_number"])
-                    weekly_map.setdefault(alloc, {})[wk] = {
-                        "percent": float(r["percent"] or 0.0),
-                        "status": (r.get("status") or "")
-                    }
-        except Exception as exc:
-            logger.exception("Error fetching weekly_allocations: %s", exc)
-            weekly_map = {}
-
-        # attach
-        for coe_id, items in allocation_map.items():
-            for it in items:
-                aid = it["allocation_id"]
-                wk = weekly_map.get(aid, {})
-                it["w1"] = wk.get(1, {}).get("percent", 0)
-                it["w2"] = wk.get(2, {}).get("percent", 0)
-                it["w3"] = wk.get(3, {}).get("percent", 0)
-                it["w4"] = wk.get(4, {}).get("percent", 0)
-
-                it["s1"] = wk.get(1, {}).get("status", "")
-                it["s2"] = wk.get(2, {}).get("status", "")
-                it["s3"] = wk.get(3, {}).get("status", "")
-                it["s4"] = wk.get(4, {}).get("status", "")
-
-    # capacity map
-    capacity_map = {}
-    for ldap_key, allocated in capacity_accumulator.items():
-        remaining = max(0, HOURS_AVAILABLE_PER_MONTH - allocated)
-        capacity_map[ldap_key] = {"allocated": allocated, "remaining": remaining}
-
-    try:
-        with connection.cursor() as cur:
-            cur.execute("""
-                SELECT DISTINCT COALESCE(ai.user_ldap, '') as user_ldap
-                FROM allocation_items ai
-                JOIN allocations a ON ai.allocation_id = a.id
-                WHERE ai.project_id = %s AND a.month_start = %s
-            """, [active_project_id, month_start])
-            for row in cur.fetchall():
-                val = row[0] or ""
-                key = val.strip().lower()
-                if key and key not in capacity_map:
-                    capacity_map[key] = {"allocated": 0, "remaining": HOURS_AVAILABLE_PER_MONTH}
-    except Exception:
-        pass
-
-    return render(request, "projects/monthly_allocations.html", {
-        "projects": projects,
-        "active_project_id": active_project_id,
-        "month_start": month_start,
-        "coes": coes,
-        "domains_map": domains_map,
-        "allocation_map": allocation_map,
-        "capacity_map": capacity_map,
-        "hours_available": HOURS_AVAILABLE_PER_MONTH,
-        "weekly_map": weekly_map,
-    })
 # -------------------------
 # save_monthly_allocations
 # -------------------------
@@ -1953,4 +1754,422 @@ def my_allocations_update_status(request):
     except Exception as exc:
         logger.exception("my_allocations_update_status failed: %s", exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+
+
+# Replace existing _get_user_projects_for_allocations and monthly_allocations with these:
+
+def _cn_to_creator(cn: str):
+    """
+    Convert "LASTNAME FirstName ..." -> "FirstName ... LASTNAME"
+    (same conversion used in edit_project() so creator matching is consistent)
+    """
+    if not cn:
+        return ""
+    parts = str(cn).strip().split()
+    if len(parts) >= 2:
+        # put the first token (last name) at the end
+        return " ".join(parts[1:]) + " " + parts[0]
+    return str(cn).strip()
+
+
+def _get_user_projects_for_allocations(request):
+    """
+    Return list of projects (dicts with id,name) where session user is:
+      - PDL (projects.pdl_user_id == session ldap identifier string)
+      - OR creator of any prism_wbs rows (prism_wbs.creator matches converted CN or ldap username)
+    This aligns with project_list / edit_project logic (pdl_user_id stored as email/username string).
+    """
+    session_ldap = request.session.get("ldap_username")
+    session_cn = request.session.get("cn", "")
+    creator_name = _cn_to_creator(session_cn) if session_cn else ""
+
+    sql = """
+        SELECT DISTINCT p.id, p.name
+        FROM projects p
+        LEFT JOIN prism_wbs pw ON pw.project_id = p.id
+        WHERE 1=0
+    """
+    params = []
+
+    # match pdl_user_id string directly (projects.pdl_user_id is stored as email/username)
+    if session_ldap:
+        sql += " OR p.pdl_user_id = %s"
+        params.append(session_ldap)
+
+    # match prism_wbs.creator converted CN (or other creators if you need to add more)
+    if creator_name:
+        sql += " OR TRIM(pw.creator) = %s"
+        params.append(creator_name)
+
+    sql += " ORDER BY p.name"
+
+    try:
+        with connection.cursor() as cur:
+            cur.execute(sql, params)
+            projects = dictfetchall(cur)
+    except Exception:
+        logger.exception("Error in _get_user_projects_for_allocations")
+        projects = []
+
+    # normalize to simple dicts for template (id,name)
+    out = [{"id": p.get("id"), "name": p.get("name") or ""} for p in projects]
+    return out
+
+
+def monthly_allocations(request):
+    """
+    Render the monthly allocations page and populate the projects dropdown.
+    Uses _get_user_projects_for_allocations so PDL matching is consistent with other pages.
+    """
+    print("monthly_allocations called")
+    session_ldap = request.session.get("ldap_username")
+    # default month_start as first of month (template uses simple controls)
+    from datetime import date
+    month_str = request.GET.get("month")
+    if month_str:
+        try:
+            month_start = datetime.strptime(month_str + "-01", "%Y-%m-%d").date()
+        except Exception:
+            month_start = date.today().replace(day=1)
+    else:
+        month_start = date.today().replace(day=1)
+
+    project_id_param = request.GET.get("project_id")
+    try:
+        active_project_id = int(project_id_param) if project_id_param else 0
+    except Exception:
+        active_project_id = 0
+
+    # --- fetch projects using corrected helper (pdl_user_id is a string in your DB) ---
+    projects = _get_user_projects_for_allocations(request)
+
+    if not active_project_id and projects:
+        active_project_id = projects[0].get("id", 0)
+
+    # If there is no project available, render page with an empty list (template will show "No projects assigned")
+    if not active_project_id:
+        return render(request, "projects/monthly_allocations.html", {
+            "projects": projects,
+            "active_project_id": active_project_id,
+            "month_start": month_start,
+            "coes": [],
+            "domains_map": {},
+            "allocation_map": {},
+            "capacity_map": {},
+            "hours_available": HOURS_AVAILABLE_PER_MONTH,
+            "weekly_map": {},
+            "now": datetime.now(),
+        })
+
+    # --- existing logic for fetching COEs, domains, allocations etc. ---
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SELECT id, name FROM coes ORDER BY name")
+            coes = dictfetchall(cur)
+    except Exception:
+        logger.exception("Error fetching COEs")
+        coes = []
+
+    coe_ids = [c["id"] for c in coes] if coes else []
+
+    # domains grouped by coe
+    domains_map = {}
+    if coe_ids:
+        try:
+            with connection.cursor() as cur:
+                cur.execute("SELECT id, name, coe_id FROM domains WHERE coe_id IN %s ORDER BY name", [tuple(coe_ids)])
+                doms = dictfetchall(cur)
+            for d in doms:
+                domains_map.setdefault(d["coe_id"], []).append({"id": d["id"], "name": d["name"]})
+        except Exception:
+            logger.exception("Error fetching domains")
+            domains_map = {}
+
+    # fetch allocation_items for this project/month
+    allocation_map = {}
+    capacity_accumulator = {}
+    allocation_ids = []
+    try:
+        with connection.cursor() as cur:
+            cur.execute("""
+                SELECT ai.id AS item_id,
+                       ai.allocation_id,
+                       ai.coe_id,
+                       ai.domain_id,
+                       ai.user_ldap,
+                       u.username AS username,
+                       u.email AS email,
+                       COALESCE(ai.total_hours,0) as total_hours
+                FROM allocation_items ai
+                JOIN allocations a ON ai.allocation_id = a.id
+                LEFT JOIN users u ON ai.user_id = u.id
+                WHERE ai.project_id = %s
+                  AND a.month_start = %s
+                ORDER BY ai.coe_id
+            """, [active_project_id, month_start])
+            items = dictfetchall(cur)
+
+        for it in items:
+            coe_id = it.get("coe_id") or 0
+            ldap_val = (it.get("user_ldap") or "").strip()
+            total_hours = int(it.get("total_hours") or 0)
+            allocation_map.setdefault(coe_id, []).append({
+                "item_id": it.get("item_id"),
+                "allocation_id": it.get("allocation_id"),
+                "coe_id": coe_id,
+                "domain_id": it.get("domain_id"),
+                "user_ldap": ldap_val,
+                "username": it.get("username"),
+                "email": it.get("email"),
+                "total_hours": total_hours,
+                "w1": 0, "w2": 0, "w3": 0, "w4": 0,
+                "s1": "", "s2": "", "s3": "", "s4": ""
+            })
+            if ldap_val:
+                key = ldap_val.lower()
+                capacity_accumulator[key] = capacity_accumulator.get(key, 0) + total_hours
+            aid = it.get("allocation_id")
+            if aid and aid not in allocation_ids:
+                allocation_ids.append(aid)
+    except Exception:
+        logger.exception("Error fetching allocation_items")
+        allocation_map = {}
+        capacity_accumulator = {}
+        allocation_ids = []
+
+    # weekly allocations attach
+    weekly_map = {}
+    if allocation_ids:
+        try:
+            with connection.cursor() as cur:
+                cur.execute("""
+                    SELECT allocation_id, week_number, percent, status
+                    FROM weekly_allocations
+                    WHERE allocation_id IN %s
+                """, [tuple(allocation_ids)])
+                for r in dictfetchall(cur):
+                    alloc = r["allocation_id"]
+                    wk = int(r["week_number"])
+                    weekly_map.setdefault(alloc, {})[wk] = {
+                        "percent": float(r["percent"] or 0.0),
+                        "status": (r.get("status") or "")
+                    }
+        except Exception:
+            logger.exception("Error fetching weekly_allocations")
+            weekly_map = {}
+
+        # attach
+        for coe_id, items in allocation_map.items():
+            for it in items:
+                aid = it["allocation_id"]
+                wk = weekly_map.get(aid, {})
+                it["w1"] = wk.get(1, {}).get("percent", 0)
+                it["w2"] = wk.get(2, {}).get("percent", 0)
+                it["w3"] = wk.get(3, {}).get("percent", 0)
+                it["w4"] = wk.get(4, {}).get("percent", 0)
+
+                it["s1"] = wk.get(1, {}).get("status", "")
+                it["s2"] = wk.get(2, {}).get("status", "")
+                it["s3"] = wk.get(3, {}).get("status", "")
+                it["s4"] = wk.get(4, {}).get("status", "")
+
+    # capacity map
+    capacity_map = {}
+    for ldap_key, allocated in capacity_accumulator.items():
+        remaining = max(0, HOURS_AVAILABLE_PER_MONTH - allocated)
+        capacity_map[ldap_key] = {"allocated": allocated, "remaining": remaining}
+
+    try:
+        with connection.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT COALESCE(ai.user_ldap, '') as user_ldap
+                FROM allocation_items ai
+                JOIN allocations a ON ai.allocation_id = a.id
+                WHERE ai.project_id = %s AND a.month_start = %s
+            """, [active_project_id, month_start])
+            for row in cur.fetchall():
+                val = row[0] or ""
+                key = val.strip().lower()
+                if key and key not in capacity_map:
+                    capacity_map[key] = {"allocated": 0, "remaining": HOURS_AVAILABLE_PER_MONTH}
+    except Exception:
+        pass
+    print("projects :",projects)
+    print("allocation_map :",allocation_map)
+    print("capacity_map :",capacity_map)
+    return render(request, "projects/monthly_allocations.html", {
+        "projects": projects,
+        "active_project_id": active_project_id,
+        "month_start": month_start,
+        "coes": coes,
+        "domains_map": domains_map,
+        "allocation_map": allocation_map,
+        "capacity_map": capacity_map,
+        "hours_available": HOURS_AVAILABLE_PER_MONTH,
+        "weekly_map": weekly_map,
+        "now": datetime.now(),
+    })
+
+
+def get_applicable_ioms(request):
+    """
+    AJAX: returns IOM list filtered by project, year, month and creator = logged user.
+    Query params: project_id, year, month, search (optional)
+    """
+    print("get_applicable_ioms called")
+    session_ldap = request.session.get("ldap_username")
+    # Determine creator value(s) same as edit project logic:
+    # Use session["cn"] if available else ldap_username.
+    session_cn = request.session.get("cn")
+    creator_candidates = []
+    if session_cn:
+        creator_candidates.append(session_cn)
+    if session_ldap:
+        creator_candidates.append(session_ldap)
+
+    project_id = request.GET.get("project_id")
+    try:
+        year = int(request.GET.get("year") or datetime.now().year)
+        month = int(request.GET.get("month") or datetime.now().month)
+    except ValueError:
+        return HttpResponseBadRequest("Invalid year/month")
+
+    search = (request.GET.get("search") or "").strip()
+
+    # pick fte/month column names
+    _MONTH_MAP = {
+        1: ("jan_fte", "jan_hours"),
+        2: ("feb_fte", "feb_hours"),
+        3: ("mar_fte", "mar_hours"),
+        4: ("apr_fte", "apr_hours"),
+        5: ("may_fte", "may_hours"),
+        6: ("jun_fte", "jun_hours"),
+        7: ("jul_fte", "jul_hours"),
+        8: ("aug_fte", "aug_hours"),
+        9: ("sep_fte", "sep_hours"),
+        10: ("oct_fte", "oct_hours"),
+        11: ("nov_fte", "nov_hours"),
+        12: ("dec_fte", "dec_hours"),
+    }
+    fte_col, hrs_col = _MONTH_MAP.get(month, ("jan_fte", "jan_hours"))
+
+    # Build query: filter by year, project_id, and creator IN (...)
+    sql = f"SELECT id, iom_id, department, {fte_col} as month_fte, {hrs_col} as month_hours, buyer_wbs_cc, seller_wbs_cc FROM prism_wbs WHERE year = %s AND ({fte_col} IS NOT NULL AND {fte_col} > 0)"
+    params = [str(year)]
+    if project_id:
+        sql += " AND project_id = %s"
+        params.append(project_id)
+    if creator_candidates:
+        placeholders = ",".join(["%s"] * len(creator_candidates))
+        sql += f" AND creator IN ({placeholders})"
+        params.extend(creator_candidates)
+    if search:
+        sql += " AND (iom_id LIKE %s OR department LIKE %s)"
+        like = f"%{search}%"
+        params.extend([like, like])
+    sql += " ORDER BY iom_id LIMIT 500"
+
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        cols = [c[0] for c in cur.description]
+
+    ioms = []
+    for r in rows:
+        rec = dict(zip(cols, r))
+        ioms.append({
+            "id": rec.get("id"),
+            "iom_id": rec.get("iom_id"),
+            "department": rec.get("department"),
+            "month_fte": float(rec.get("month_fte") or 0),
+            "month_hours": float(rec.get("month_hours") or 0),
+            "buyer_wbs_cc": rec.get("buyer_wbs_cc"),
+            "seller_wbs_cc": rec.get("seller_wbs_cc"),
+        })
+        print("found iom :",rec)
+    return JsonResponse({"ok": True, "ioms": ioms})
+
+def get_iom_details(request):
+    """
+    AJAX: Given prism_wbs.id (iom row id), year, month, return detailed IOM info + remaining FTE/hours:
+      - Queries prism_wbs for month_fte and month_hours
+      - Sums allocation_items for that prism_wbs for allocations in the same project+month to compute used hours
+    Params: iom_row_id, project_id, year, month
+    """
+    iom_row_id = request.GET.get("iom_row_id")
+    project_id = request.GET.get("project_id")
+    try:
+        year = int(request.GET.get("year") or datetime.now().year)
+        month = int(request.GET.get("month") or datetime.now().month)
+    except ValueError:
+        return HttpResponseBadRequest("Invalid year/month")
+
+    if not iom_row_id:
+        return HttpResponseBadRequest("iom_row_id required")
+
+    # month columns
+    _MONTH_MAP = {
+        1: ("jan_fte", "jan_hours"),
+        2: ("feb_fte", "feb_hours"),
+        3: ("mar_fte", "mar_hours"),
+        4: ("apr_fte", "apr_hours"),
+        5: ("may_fte", "may_hours"),
+        6: ("jun_fte", "jun_hours"),
+        7: ("jul_fte", "jul_hours"),
+        8: ("aug_fte", "aug_hours"),
+        9: ("sep_fte", "sep_hours"),
+        10: ("oct_fte", "oct_hours"),
+        11: ("nov_fte", "nov_hours"),
+        12: ("dec_fte", "dec_hours"),
+    }
+    fte_col, hrs_col = _MONTH_MAP.get(month, ("jan_fte", "jan_hours"))
+
+    with connection.cursor() as cur:
+        # fetch pris_wbs row
+        cur.execute(f"SELECT id, iom_id, project_id, department, {fte_col} as month_fte, {hrs_col} as month_hours, total_fte, total_hours, buyer_wbs_cc, seller_wbs_cc FROM prism_wbs WHERE id = %s LIMIT 1", [iom_row_id])
+        row = cur.fetchone()
+        if not row:
+            return JsonResponse({"ok": False, "error": "IOM not found"}, status=404)
+        cols = [c[0] for c in cur.description]
+        rec = dict(zip(cols, row))
+
+        # compute used hours for that IOM's project and month:
+        # find allocations for the project & month_start
+        # month_start date string needed: YYYY-MM-01
+        month_start = f"{year}-{str(month).zfill(2)}-01"
+        cur.execute("""
+            SELECT COALESCE(SUM(ai.total_hours),0) FROM allocation_items ai
+            JOIN allocations a ON ai.allocation_id = a.id
+            WHERE ai.project_id = %s AND a.month_start = %s
+            -- optionally restrict to this iom if allocation_items hold a pointer to prism_wbs row (if you store iom_id in allocation_items)
+        """, [project_id, month_start])
+        used_hours = cur.fetchone()[0] or 0
+
+    month_hours = float(rec.get("month_hours") or 0)
+    month_fte = float(rec.get("month_fte") or 0)
+    remaining_hours = max(0.0, month_hours - used_hours)
+    # remaining FTE proportionally computed (if month_hours > 0)
+    remaining_fte = (remaining_hours / month_hours * month_fte) if month_hours > 0 else 0.0
+
+    resp = {
+        "ok": True,
+        "iom": {
+            "id": rec.get("id"),
+            "iom_id": rec.get("iom_id"),
+            "department": rec.get("department"),
+            "month_fte": month_fte,
+            "month_hours": month_hours,
+            "total_fte": float(rec.get("total_fte") or 0),
+            "total_hours": float(rec.get("total_hours") or 0),
+            "buyer_wbs_cc": rec.get("buyer_wbs_cc"),
+            "seller_wbs_cc": rec.get("seller_wbs_cc"),
+            "remaining_hours": float(remaining_hours),
+            "remaining_fte": float(remaining_fte),
+        }
+    }
+    return JsonResponse(resp)
+
+
+
 
