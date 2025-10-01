@@ -1068,18 +1068,22 @@ def get_allocations_for_iom(request):
     saved_items = [{"user_ldap": r[0], "total_hours": float(r[1] or 0)} for r in rows]
     return JsonResponse({"ok": True, "saved_items": saved_items})
 
-
 @require_POST
 def save_monthly_allocations(request):
+    print("[save_monthly_allocations] called")
     try:
         data = json.loads(request.body.decode("utf-8"))
-    except Exception:
+        print(f"[save_monthly_allocations] received data: {data}")
+    except Exception as e:
+        print(f"[save_monthly_allocations] JSON decode error: {e}")
         return JsonResponse({"ok": False, "error": "invalid json"}, status=400)
 
     project_id = data.get("project_id")
     month_start = data.get("month_start")
     items = data.get("items", [])
+    print(f"[save_monthly_allocations] project_id: {project_id}, month_start: {month_start}, items: {items}")
     if not (project_id and month_start):
+        print("[save_monthly_allocations] missing params")
         return JsonResponse({"ok": False, "error": "missing params"}, status=400)
 
     grouped = {}
@@ -1087,44 +1091,51 @@ def save_monthly_allocations(request):
         iom_id = it.get("iom_id")
         ldap = (it.get("user_ldap") or "").strip()
         try:
-            # ensure numeric and keep 2 decimals
-            hrs = round(float(it.get("total_hours") or 0), 2)
-        except Exception:
+            hrs_raw = it.get("total_hours")
+            hrs = float(hrs_raw)
+            # Keep two decimals, do not round to int
+            hrs = float(f"{hrs:.2f}")
+            print(f"[save_monthly_allocations] Parsed hours for {ldap} (iom_id={iom_id}): raw={hrs_raw}, float={hrs}")
+        except Exception as ex:
+            print(f"[save_monthly_allocations] Error parsing hours for {ldap} (iom_id={iom_id}): {ex}")
             continue
         if not iom_id or not ldap or hrs <= 0:
+            print(f"[save_monthly_allocations] Skipping entry: iom_id={iom_id}, ldap={ldap}, hrs={hrs}")
             continue
         grouped.setdefault(iom_id, []).append((ldap, hrs))
+
+    print(f"[save_monthly_allocations] grouped allocations: {grouped}")
 
     saved = {}
     try:
         with transaction.atomic():
             with connection.cursor() as cur:
                 for iom_id, rows in grouped.items():
-                    # delete existing for the same project,iom,month
+                    print(f"[save_monthly_allocations] Deleting old entries for project_id={project_id}, iom_id={iom_id}, month_start={month_start}")
                     cur.execute(
                         "DELETE FROM monthly_allocation_entries WHERE project_id=%s AND iom_id=%s AND month_start=%s",
                         (project_id, iom_id, month_start)
                     )
-                    # insert new rows (store floats)
                     for ldap, hrs in rows:
+                        print(f"[save_monthly_allocations] Inserting: project_id={project_id}, iom_id={iom_id}, month_start={month_start}, ldap={ldap}, hrs={hrs}")
                         cur.execute("""
                             INSERT INTO monthly_allocation_entries
                             (project_id, iom_id, month_start, user_ldap, total_hours, created_at)
                             VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         """, (project_id, iom_id, month_start, ldap, hrs))
-                    # fetch saved rows for this iom_id to return
                     cur.execute("""
                         SELECT user_ldap, total_hours FROM monthly_allocation_entries
                         WHERE project_id=%s AND iom_id=%s AND month_start=%s
                     """, (project_id, iom_id, month_start))
-                    saved[iom_id] = [{"user_ldap": r[0], "total_hours": float(r[1] or 0)} for r in cur.fetchall()]
+                    fetched = cur.fetchall()
+                    print(f"[save_monthly_allocations] Saved rows for iom_id={iom_id}: {fetched}")
+                    saved[iom_id] = [{"user_ldap": r[0], "total_hours": float(r[1] or 0)} for r in fetched]
+        print(f"[save_monthly_allocations] All saved: {saved}")
         return JsonResponse({"ok": True, "saved": saved})
     except Exception as exc:
         logger.exception("save_monthly_allocations failed: %s", exc)
+        print(f"[save_monthly_allocations] Exception: {exc}")
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
-
-
-
 # -------------------------
 # team_allocations
 # -------------------------

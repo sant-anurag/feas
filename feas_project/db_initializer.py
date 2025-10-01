@@ -360,7 +360,36 @@ class DatabaseInitializer:
                         UNIQUE KEY `uq_prism_wbs_iom` (`iom_id`),
                         FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE SET NULL
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """,
                 """
+                CREATE TABLE `monthly_allocation_entries` (
+                      `id` BIGINT NOT NULL AUTO_INCREMENT,
+                      `project_id` BIGINT NULL,
+                      `iom_id` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
+                      `month_start` DATE NOT NULL,
+                      `user_ldap` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+                      `total_hours` DECIMAL(10,2) UNSIGNED NOT NULL DEFAULT '0.00',
+                      `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`id`),
+                    
+                      KEY `idx_project_id` (`project_id`),
+                      KEY `idx_iom_id` (`iom_id`),
+                      KEY `idx_month_start` (`month_start`),
+                      KEY `idx_proj_month` (`project_id`, `month_start`),
+                      KEY `idx_iom_month` (`iom_id`, `month_start`),
+                    
+                      CONSTRAINT `fk_monthly_alloc_project`
+                        FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`)
+                        ON DELETE SET NULL ON UPDATE CASCADE,
+                    
+                      CONSTRAINT `fk_monthly_alloc_iom`
+                        FOREIGN KEY (`iom_id`) REFERENCES `prism_wbs` (`iom_id`)
+                        ON DELETE SET NULL ON UPDATE CASCADE
+                    ) ENGINE=InnoDB
+                      DEFAULT CHARSET=utf8mb4
+                      COLLATE=utf8mb4_0900_ai_ci;
+
+                    """
             ]
         )
 
