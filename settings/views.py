@@ -628,3 +628,97 @@ def import_master(request):
         "preview_headers": preview_headers,
         "preview_rows": preview_rows,
     })
+
+from django.shortcuts import render
+from django.http import JsonResponse, HttpResponseBadRequest
+from django.views.decorators.http import require_GET, require_POST
+from django.db import connection
+from datetime import datetime
+import json
+
+@require_GET
+def monthly_hours_settings(request):
+    print("[monthly_hours_settings] called")
+    try:
+        year = int(request.GET.get("year") or datetime.now().year)
+        print(f"[monthly_hours_settings] year from request: {year}")
+    except ValueError:
+        year = datetime.now().year
+        print(f"[monthly_hours_settings] invalid year, using current: {year}")
+
+    months = []
+    with connection.cursor() as cur:
+        print(f"[monthly_hours_settings] executing SELECT for year: {year}")
+        cur.execute("SELECT month, max_hours FROM monthly_hours_limit WHERE year=%s", [year])
+        rows = cur.fetchall()
+        print(f"[monthly_hours_settings] rows fetched: {rows}")
+        values = {row[0]: float(row[1]) for row in rows}
+        print(f"[monthly_hours_settings] values dict: {values}")
+
+    for m in range(1, 13):
+        val = values.get(m, 183.75)
+        print(f"[monthly_hours_settings] month: {m}, value: {val}")
+        months.append({"month": m, "value": val})
+
+    print(f"[monthly_hours_settings] months list: {months}")
+    return render(request, "settings/settings_monthly_hours.html", {"year": year, "months": months})
+
+
+@require_POST
+def save_monthly_hours(request):
+    print("[save_monthly_hours] called")
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        print(f"[save_monthly_hours] data loaded: {data}")
+        year = int(data.get("year"))
+        months = data.get("months", [])
+        print(f"[save_monthly_hours] year: {year}, months: {months}")
+    except Exception as e:
+        print(f"[save_monthly_hours] Exception parsing payload: {e}")
+        return HttpResponseBadRequest("Invalid payload")
+
+    try:
+        with connection.cursor() as cur:
+            for m in months:
+                month = int(m.get("month"))
+                value = float(m.get("value"))
+                print(f"[save_monthly_hours] inserting month: {month}, value: {value}")
+                if not (1 <= month <= 12):
+                    print(f"[save_monthly_hours] skipping invalid month: {month}")
+                    continue
+                cur.execute("""
+                    INSERT INTO monthly_hours_limit (year, month, max_hours)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE max_hours=VALUES(max_hours), updated_at=CURRENT_TIMESTAMP
+                """, [year, month, value])
+    except Exception as ex:
+        print(f"[save_monthly_hours] Exception during DB insert: {ex}")
+        return JsonResponse({"ok": False, "error": str(ex)})
+
+    print(f"[save_monthly_hours] save successful for year: {year}")
+    return JsonResponse({"ok": True, "year": year})
+
+
+@require_GET
+def get_monthly_max(request):
+    print("[get_monthly_max] called")
+    try:
+        year = int(request.GET.get("year"))
+        month = int(request.GET.get("month"))
+        print(f"[get_monthly_max] year: {year}, month: {month}")
+    except Exception as e:
+        print(f"[get_monthly_max] Exception parsing year/month: {e}")
+        return HttpResponseBadRequest("Invalid year/month")
+
+    with connection.cursor() as cur:
+        print(f"[get_monthly_max] executing SELECT for year: {year}, month: {month}")
+        cur.execute("""
+            SELECT max_hours FROM monthly_hours_limit
+            WHERE year=%s AND month=%s
+        """, [year, month])
+        row = cur.fetchone()
+        print(f"[get_monthly_max] row fetched: {row}")
+    max_hours = float(row[0]) if row else 183.75
+    print(f"[get_monthly_max] max_hours: {max_hours}")
+
+    return JsonResponse({"ok": True, "max_hours": max_hours})

@@ -287,6 +287,18 @@ class DatabaseInitializer:
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """,
                 """
+                CREATE TABLE IF NOT EXISTS monthly_hours_limit (
+                      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                      year SMALLINT NOT NULL,
+                      month TINYINT NOT NULL,
+                      max_hours DECIMAL(7,2) NOT NULL DEFAULT 183.75,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                      UNIQUE KEY uq_year_month (year, month)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS `project_contacts` (
                         `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
                         `project_id` BIGINT NOT NULL,

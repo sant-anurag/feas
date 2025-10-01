@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+<link rel="stylesheet" href="{% static 'settings/css/monthly_hours.css' %}">
+
+<div class="hours-card">
+  <h1 class="page-title">Monthly Hours Limit</h1>
+  <p class="page-sub">Set the maximum allocatable hours per resource for each month in a year.</p>
+
+  {# Render CSRF token into DOM so JS can pick it up reliably #}
+  <form id="csrfForm" style="display:none;">{% csrf_token %}</form>
+
+  <div class="toolbar" style="margin-top:10px;">
+    <label for="yearInput" style="font-weight:600; margin-right:8px;">Year</label>
+    <input id="yearInput" name="year" type="number" value="{{ year }}" class="input-box" min="1900" max="9999">
+    <button id="loadYearBtn" class="btn-secondary" type="button">Load</button>
+  </div>
+
+  <div style="overflow:auto; margin-top:18px;">
+    <table class="hours-table">
+      <thead>
+        <tr>
+          <th style="width:100px">Month</th>
+          <th>Max Hours</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in months %}
+        <tr>
+          <td style="text-align:center; font-weight:600;">{{ m.month }}</td>
+          <td style="text-align:center;">
+            <input type="number"
+                   class="month-input"
+                   data-month="{{ m.month }}"
+                   step="0.25"
+                   min="0"
+                   value="{{ m.value|floatformat:2 }}"
+                   style="width:120px; padding:6px; border-radius:6px; border:1px solid #dcdcdc; text-align:right;">
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="actions" style="margin-top:18px;">
+    <button id="saveBtn" class="btn-primary" type="button">Save</button>
+    <div id="saveSpinner" style="display:none; margin-left:12px; align-self:center;">
+      <span style="color:#666; font-size:13px;">Saving…</span>
+    </div>
+    <div id="msg" class="msg" style="margin-left:14px;"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // Namespaced URLs (settings app)
+  const SAVE_URL = "{% url 'settings:save_monthly_hours' %}";
+  const LOAD_URL = "{% url 'settings:monthly_hours_settings' %}";
+
+  // grab CSRF token from rendered hidden input
+  function getCsrfToken() {
+    const node = document.querySelector('#csrfForm [name=csrfmiddlewaretoken]');
+    return node ? node.value : null;
+  }
+
+  const csrftoken = getCsrfToken();
+
+  const saveBtn = document.getElementById('saveBtn');
+  const loadBtn = document.getElementById('loadYearBtn');
+  const yearInput = document.getElementById('yearInput');
+  const msg = document.getElementById('msg');
+  const spinner = document.getElementById('saveSpinner');
+
+  function showMsg(text, ok=true) {
+    msg.style.color = ok ? '#0b5ed7' : '#c7254e';
+    msg.textContent = text;
+    if (ok) {
+      setTimeout(()=> msg.textContent = '', 3000);
+    }
+  }
+
+  async function doSave() {
+    const year = Number(yearInput.value) || new Date().getFullYear();
+    const inputs = Array.from(document.querySelectorAll('.month-input'));
+    const months = inputs.map(i => ({ month: Number(i.dataset.month), value: Number(i.value) || 0 }));
+
+    // client-side basic validation
+    for (const m of months) {
+      if (m.month < 1 || m.month > 12) {
+        showMsg('Invalid month value in form', false);
+        return;
+      }
+      if (m.value < 0) {
+        showMsg('Max hours cannot be negative', false);
+        return;
+      }
+    }
+
+    spinner.style.display = '';
+    saveBtn.disabled = true;
+    showMsg('', true);
+
+    try {
+      const res = await fetch(SAVE_URL, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrftoken || ''
+        },
+        body: JSON.stringify({ year, months })
+      });
+
+      if (!res.ok) {
+        let text = 'Save failed: ' + res.status;
+        try { const j = await res.json(); if (j && j.error) text += ' - ' + j.error; } catch(e){}
+        showMsg(text, false);
+        return;
+      }
+
+      const data = await res.json();
+      if (data && data.ok) {
+        showMsg('Saved successfully', true);
+      } else {
+        showMsg('Save failed: ' + (data && data.error ? data.error : 'unknown'), false);
+      }
+    } catch (err) {
+      console.error('Save error', err);
+      showMsg('Save failed (network)', false);
+    } finally {
+      spinner.style.display = 'none';
+      saveBtn.disabled = false;
+    }
+  }
+
+  saveBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    doSave();
+  });
+
+  loadBtn.addEventListener('click', function(e){
+    const y = Number(yearInput.value) || new Date().getFullYear();
+    // reload the page with new year param
+    window.location = LOAD_URL + '?year=' + y;
+  });
+
+  // also allow pressing Enter in year field to load
+  yearInput.addEventListener('keydown', function(ev){
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      loadBtn.click();
+    }
+  });
+
+})();
+</script>
+{% endblock %}
