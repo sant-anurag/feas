@@ -1767,7 +1767,12 @@ def monthly_allocations(request):
         for it in items:
             coe_id = it.get("coe_id") or 0
             ldap_val = (it.get("user_ldap") or "").strip()
-            total_hours = int(it.get("total_hours") or 0)
+            # preserve fractional hours (use float, 2-decimal rounding)
+            try:
+                total_hours = round(float(it.get("total_hours") or 0.0), 2)
+            except Exception:
+                total_hours = 0.0
+
             allocation_map.setdefault(coe_id, []).append({
                 "item_id": it.get("item_id"),
                 "allocation_id": it.get("allocation_id"),
@@ -1782,10 +1787,12 @@ def monthly_allocations(request):
             })
             if ldap_val:
                 key = ldap_val.lower()
-                capacity_accumulator[key] = capacity_accumulator.get(key, 0) + total_hours
+                # accumulate using floats and round to 2 decimals
+                capacity_accumulator[key] = round(capacity_accumulator.get(key, 0.0) + total_hours, 2)
             aid = it.get("allocation_id")
             if aid and aid not in allocation_ids:
                 allocation_ids.append(aid)
+
     except Exception:
         logger.exception("Error fetching allocation_items")
         allocation_map = {}
@@ -1831,8 +1838,9 @@ def monthly_allocations(request):
     # capacity map
     capacity_map = {}
     for ldap_key, allocated in capacity_accumulator.items():
-        remaining = max(0, HOURS_AVAILABLE_PER_MONTH - allocated)
-        capacity_map[ldap_key] = {"allocated": allocated, "remaining": remaining}
+        # preserve fractional hours; remaining uses configured HOURS_AVAILABLE_PER_MONTH as fallback
+        remaining = round(max(0.0, float(HOURS_AVAILABLE_PER_MONTH) - float(allocated)), 2)
+        capacity_map[ldap_key] = {"allocated": round(float(allocated), 2), "remaining": remaining}
 
     try:
         with connection.cursor() as cur:
@@ -2038,12 +2046,16 @@ def get_iom_details(request):
         return JsonResponse({"ok": False, "error": str(ex)}, status=500)
 
     month_hours = float(rec.get("month_hours") or 0.0)
-    month_fte = float(rec.get("month_fte") or 0.0)
+    # Use DB-driven month_limit
+    month_limit = _get_month_hours_limit(year, month)
+    # compute authoritative month_fte according to your formula (month_hours / month_limit)
+    month_fte = round((month_hours / month_limit) if month_limit > 0 else 0.0, 2)
+
     remaining_hours = max(0.0, month_hours - float(used_hours))
+    remaining_hours = round(remaining_hours, 2)
 
     # compute remaining_fte measured as remaining_hours / monthly limit (DB-driven)
-    month_limit = _get_month_hours_limit(year, month)
-    remaining_fte = (remaining_hours / month_limit) if month_limit > 0 else 0.0
+    remaining_fte = round((remaining_hours / month_limit) if month_limit > 0 else 0.0, 2)
 
     resp = {
         "ok": True,
@@ -2053,8 +2065,9 @@ def get_iom_details(request):
             "department": rec.get("department"),
             "site": rec.get("site"),
             "function": rec.get("function"),
+            # provide computed month_fte (2 decimal), and month_hours (2-decimal)
             "month_fte": float(month_fte),
-            "month_hours": float(month_hours),
+            "month_hours": float(round(month_hours, 2)),
             "total_fte": float(rec.get("total_fte") or 0),
             "total_hours": float(rec.get("total_hours") or 0),
             "buyer_wbs_cc": rec.get("buyer_wbs_cc"),
@@ -2064,6 +2077,7 @@ def get_iom_details(request):
             "month_limit": float(month_limit),
         }
     }
+
     return JsonResponse(resp)
 
 

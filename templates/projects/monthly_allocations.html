@@ -291,12 +291,15 @@
     iomSite.textContent = 'Site: ' + (iom.site || '—');
     iomFunction.textContent = 'Function: ' + (iom.function || '—');
 
-    iomMonthFte.textContent = (parseFloat(iom.month_fte||0)).toFixed(4);
+    // show FTE with 2 decimal precision as requested (hours remain 2-decimal)
+    iomMonthFte.textContent = (parseFloat(iom.month_fte||0)).toFixed(2);
     iomMonthHrs.textContent = (parseFloat(iom.month_hours||0)).toFixed(2);
 
+
     // remaining values from server (we update both kv and badge)
-    iomRemFte.textContent = (parseFloat(iom.remaining_fte||0)).toFixed(4);
+    iomRemFte.textContent = (parseFloat(iom.remaining_fte||0)).toFixed(2);
     iomRemHrs.textContent = (parseFloat(iom.remaining_hours||0)).toFixed(2);
+
 
     // set current month limit (per-resource limit)
     CURRENT_MONTH_LIMIT = parseFloat(iom.month_limit || DEFAULT_MONTHLY_LIMIT);
