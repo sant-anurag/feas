@@ -13,18 +13,37 @@
 .team-table { width:100%; border-collapse:collapse; }
 .team-table th, .team-table td { padding:10px 12px; border-bottom:1px solid #eef2f7; text-align:left; vertical-align:middle; }
 .team-table thead th { background:#f8fafc; font-weight:700; color:#374151; }
-.week-input { width:80px; padding:6px 8px; border-radius:6px; border:1px solid #e6eaf0; }
+.week-input { width:100px; padding:6px 8px; border-radius:6px; border:1px solid #e6eaf0; }
 .actions { display:flex; gap:8px; align-items:center; }
 .btn { padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:700; }
 .btn-save { background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; border:none; }
 .btn-reset { background:#fff; border:1px solid rgba(10,30,80,0.08); color:#0b1320; }
+
+.controls { display:flex; gap:12px; align-items:center; margin-bottom:12px; }
+.control-item { display:flex; gap:8px; align-items:center; }
+
+.no-allocs { background: #fff5f5; border: 1px solid #fde3e3; border-radius: 10px; padding: 12px; margin-top: 20px; }
+.no-allocs table { width:100%; border-collapse:collapse; }
+.no-allocs th, .no-allocs td { padding:8px 10px; border-bottom:1px solid #f8dcdc; text-align:left; vertical-align:middle; }
+.no-allocs thead th { font-weight:700; color:#7f1d1d; background: transparent; }
 .muted { color:#6b7280; font-size:12px; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container">
-  <h2 style="margin-bottom:14px;">Team Allocation — {{ month_start|date:"F Y" }}</h2>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <h2 style="margin:0;">Team Allocation — {{ month_start|date:"F Y" }}</h2>
+
+    <form method="get" style="display:flex;gap:8px;align-items:center;">
+      {# HTML5 month input produces YYYY-MM, aligns with server parsing #}
+      <div class="control-item">
+        <label class="small-muted" style="margin-right:6px;">Select month</label>
+        <input type="month" name="month" value="{{ month_start|date:'Y-m' }}" style="padding:8px;border-radius:8px;border:1px solid #e6eaf0;">
+      </div>
+      <button class="btn btn-reset" type="submit">Load</button>
+    </form>
+  </div>
 
   {% if not rows %}
     <div class="panel" style="padding:18px;border-radius:10px;background:#fff;">
@@ -42,7 +61,7 @@
             </div>
             <div class="small-muted">Reportee</div>
           </div>
-          <div class="small-muted">Tip: enter weekly % values. Save per-row.</div>
+          <div class="small-muted">Tip: enter weekly % values (0-100). Save per-row.</div>
         </div>
 
         <table class="team-table">
@@ -64,19 +83,25 @@
               <tr data-allocation="{{ r.allocation_id }}">
                 <td>{{ r.project_name }}</td>
                 <td>{{ r.domain_name }}</td>
-                <td>{{ r.total_hours }}</td>
-                <td><input class="week-input" type="number" min="0" max="100"
-                             value="{{ w|dict_get:1|dict_get:'hours'|default:0 }}"
+                <td>{{ r.total_hours|floatformat:2 }}</td>
+
+                {# weekly_map stores 'percent' per week in the view; show percent here #}
+                <td><input class="week-input" type="number" min="0" max="100" step="0.01"
+                             value="{{ w|dict_get:1|dict_get:'percent'|default:0 }}"
                              data-week="1"></td>
-                  <td><input class="week-input" type="number" min="0" max="100"
-                             value="{{ w|dict_get:2|dict_get:'hours'|default:0 }}"
+
+                <td><input class="week-input" type="number" min="0" max="100" step="0.01"
+                             value="{{ w|dict_get:2|dict_get:'percent'|default:0 }}"
                              data-week="2"></td>
-                  <td><input class="week-input" type="number" min="0" max="100"
-                             value="{{ w|dict_get:3|dict_get:'hours'|default:0 }}"
+
+                <td><input class="week-input" type="number" min="0" max="100" step="0.01"
+                             value="{{ w|dict_get:3|dict_get:'percent'|default:0 }}"
                              data-week="3"></td>
-                  <td><input class="week-input" type="number" min="0" max="100"
-                             value="{{ w|dict_get:4|dict_get:'hours'|default:0 }}"
+
+                <td><input class="week-input" type="number" min="0" max="100" step="0.01"
+                             value="{{ w|dict_get:4|dict_get:'percent'|default:0 }}"
                              data-week="4"></td>
+
                 <td class="actions">
                   <button class="btn btn-save" type="button">Save</button>
                   <button class="btn btn-reset" type="button">Reset</button>
@@ -89,6 +114,37 @@
       </div>
     {% endfor %}
   {% endif %}
+
+  {# Reportees with no allocation — shown at bottom in a light-red table #}
+  {% if reportees_no_alloc %}
+    <div class="no-allocs">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-weight:800;color:#7f1d1d;">Reportees without allocations — {{ month_start|date:"F Y" }}</div>
+        <div class="small-muted">You may want to create allocations for them.</div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Resource (LDAP)</th>
+            <th>Name / Email</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in reportees_no_alloc %}
+          <tr>
+            <td>{{ r.ldap }}</td>
+            <td>{% if r.display %}{{ r.display }}{% else %}—{% endif %}{% if r.email %} &lt;{{ r.email }}&gt;{% endif %}</td>
+            <td>
+              <a class="btn btn-reset" href="{% url 'projects:monthly_allocations' %}?project_id=&month={{ month_start|date:'Y-m' }}">Create allocation</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
 </div>
 {% endblock %}
 
@@ -102,12 +158,13 @@ document.querySelectorAll('.btn-save').forEach(btn=>{
     const allocation_id = tr.dataset.allocation;
     const weekly = {};
     tr.querySelectorAll('.week-input').forEach(inp=>{
+      // use numeric strings / numbers; send as-is
       weekly[inp.dataset.week] = Number(inp.value || 0);
     });
 
-    // optional: validate total percentage
+    // validate total percentage per allocation row
     let totalPct = 0;
-    Object.values(weekly).forEach(v=> totalPct += v);
+    Object.values(weekly).forEach(v=> totalPct += Number(v));
     if(totalPct > 100){
       if(!confirm("Total % > 100. Continue anyway?")) return;
     }
@@ -121,8 +178,11 @@ document.querySelectorAll('.btn-save').forEach(btn=>{
       },
       body: JSON.stringify({allocation_id: Number(allocation_id), weekly: weekly})
     }).then(r=>r.json()).then(data=>{
-      if(data.ok) alert("Saved successfully!");
-      else alert("Error: " + (data.error || JSON.stringify(data)));
+      if(data.ok) {
+        alert("Saved successfully!");
+        // optionally reload weekly data for this row — for now reload entire page to reflect server-calculated hours
+        location.reload();
+      } else alert("Error: " + (data.error || JSON.stringify(data)));
     }).catch(err=>{
       alert("Save failed: " + err);
     });

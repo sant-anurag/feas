@@ -33,6 +33,11 @@ from openpyxl.styles import Font, Alignment, Border, Side
 from django.http import HttpResponse
 from openpyxl.utils import get_column_letter
 
+from decimal import Decimal, ROUND_HALF_UP
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse, HttpResponseBadRequest
+from django.db import connection, transaction
+
 PAGE_SIZE = 10
 # -------------------------
 # LDAP helpers (use your ldap_utils)
@@ -1136,9 +1141,7 @@ def save_monthly_allocations(request):
         logger.exception("save_monthly_allocations failed: %s", exc)
         print(f"[save_monthly_allocations] Exception: {exc}")
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
-# -------------------------
-# team_allocations
-# -------------------------
+
 # ---- Helper utilities ---------------------------------------------------
 
 def _sql_in_clause(items):
@@ -1272,18 +1275,21 @@ def team_allocations(request):
     if reportees_ldaps:
         in_clause, in_params = _sql_in_clause(reportees_ldaps)
         sql = f"""
-            SELECT ai.id as item_id, ai.allocation_id, ai.user_ldap,
-                   u.username, u.email,
-                   p.name as project_name,
-                   d.name as domain_name,
-                   a.total_hours
-            FROM allocation_items ai
-            JOIN allocations a ON ai.allocation_id = a.id
-            LEFT JOIN users u ON ai.user_id = u.id
-            JOIN projects p ON ai.project_id = p.id
-            LEFT JOIN domains d ON ai.domain_id = d.id
-            WHERE a.month_start = %s
-              AND ai.user_ldap IN {in_clause}
+            SELECT mae.id AS allocation_id,
+                   mae.project_id,
+                   p.name AS project_name,
+                   mae.iom_id AS iom_id,
+                   pw.department AS domain_name,
+                   COALESCE(mae.user_ldap, '') AS user_ldap,
+                   u.username AS username,
+                   u.email AS email,
+                   COALESCE(mae.total_hours, 0.00) AS total_hours
+            FROM monthly_allocation_entries mae
+            LEFT JOIN projects p ON mae.project_id = p.id
+            LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
+            LEFT JOIN users u ON u.email = mae.user_ldap
+            WHERE mae.month_start = %s
+              AND mae.user_ldap IN {in_clause}
             ORDER BY u.username, p.name
         """
         params = [month_start] + in_params
@@ -1291,10 +1297,11 @@ def team_allocations(request):
             with connection.cursor() as cur:
                 cur.execute(sql, params)
                 rows = dictfetchall(cur) or []
-                print("team_allocations: fetched %d allocation rows", len(rows))
+                print("team_allocations: fetched %d allocation rows (from monthly_allocation_entries)" % len(rows))
         except Exception as exc:
             logger.exception("team_allocations: DB query failed: %s", exc)
             rows = []
+
     else:
         print("team_allocations: no reportees to fetch for %s", session_ldap)
 
@@ -1363,12 +1370,41 @@ def team_allocations(request):
     print("all rows :",all_rows)
     print("all weekly_map :",weekly_map)
 
+    # --- compute reportees with no allocations for the selected month ----------------
+    allocated_ldaps = {(r.get("user_ldap") or "").strip().lower() for r in all_rows if
+                       (r.get("user_ldap") or "").strip()}
+    reportees_no_alloc = []
+    try:
+        for ld in reportees_ldaps:
+            key = (ld or "").strip()
+            if not key:
+                continue
+            if key.lower() not in allocated_ldaps:
+                # try to show a friendly display name from local ldap directory (if available)
+                local = _get_local_ldap_entry(key)
+                display_name = local.get("cn") if local and local.get("cn") else (
+                    local.get("username") if local else "")
+                email_val = local.get("email") if local and local.get("email") else (key if "@" in key else "")
+                reportees_no_alloc.append({
+                    "ldap": key,
+                    "display": display_name,
+                    "email": email_val
+                })
+    except Exception:
+        logger.exception("team_allocations: error building reportees_no_alloc")
+        reportees_no_alloc = []
+
+    # debug prints (optional)
+    print("reportees_no_alloc count:", len(reportees_no_alloc))
+
     return render(request, "projects/team_allocations.html", {
         "rows": all_rows,
         "weekly_map": weekly_map,
         "month_start": month_start,
         "reportees": reportees_ldaps,
+        "reportees_no_alloc": reportees_no_alloc,
     })
+
 
 # -------------------------
 # save_team_allocation
@@ -1376,77 +1412,94 @@ def team_allocations(request):
 @require_POST
 def save_team_allocation(request):
     """
-    Save weekly % -> hours mapping for a given allocation_id.
-    Validates that the session user is manager of the allocation (the user being updated must be a reportee).
+    Save weekly percent allocations for a monthly allocation (monthly_allocation_entries.id).
+    Expects JSON body: { "allocation_id": 123, "weekly": { "1": 25.0, "2": 25.0, "3": 25.0, "4": 25.0 } }
+    Returns JSON: { ok: True, allocation_id: 123, weeks: { "1": "46.25", ... } }
     """
-    session_ldap = request.session.get("ldap_username")
-    session_pwd = request.session.get("ldap_password")
-    print("save_team_allocation - session_ldap:", session_ldap)
+    # parse JSON payload
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponseBadRequest("Invalid JSON payload")
+
+    allocation_id = payload.get('allocation_id')
+    weekly = payload.get('weekly', {}) or {}
 
     try:
-        payload = json.loads(request.body.decode("utf-8"))
+        allocation_id = int(allocation_id)
     except Exception:
-        return HttpResponseBadRequest("Invalid JSON")
+        return HttpResponseBadRequest("Invalid allocation_id")
 
-    allocation_id = payload.get("allocation_id")
-    weekly = payload.get("weekly", {})
+    if allocation_id <= 0:
+        return HttpResponseBadRequest("Invalid allocation_id")
 
-    if not allocation_id:
-        return HttpResponseBadRequest("Missing allocation_id")
-
-    # fetch allocation and user_ldap + total_hours
+    # fetch canonical allocation info from monthly_allocation_entries
     with connection.cursor() as cur:
         cur.execute("""
-            SELECT a.id, a.total_hours, ai.user_ldap
-            FROM allocations a
-            JOIN allocation_items ai ON ai.allocation_id = a.id
-            WHERE a.id = %s LIMIT 1
+            SELECT id, total_hours, user_ldap
+            FROM monthly_allocation_entries
+            WHERE id = %s
+            LIMIT 1
         """, [allocation_id])
         rec = cur.fetchone()
-        if not rec:
-            return HttpResponseBadRequest("Invalid allocation_id")
-        alloc_id, total_hours, user_ldap = rec
 
-    # validate manager -> reportee via ldap_utils using session creds
-    if not session_ldap or not session_pwd:
-        return HttpResponseForbidden("Missing session LDAP credentials")
+    if not rec:
+        return HttpResponseBadRequest("Allocation not found")
 
-    creds = (session_ldap, session_pwd)
-    user_entry = get_user_entry_by_username(session_ldap, username_password_for_conn=creds)
-    if not user_entry:
-        return HttpResponseForbidden("Manager not found in LDAP")
+    _, total_hours_raw, user_ldap = rec
 
-    user_dn = getattr(user_entry, "entry_dn", None)
-    reportees_entries = get_reportees_for_user_dn(user_dn, username_password_for_conn=creds) or []
-    reportees_ldaps = []
-    for ent in reportees_entries:
-        val = ent.get("userPrincipalName") or ent.get("mail")
-        if val:
-            reportees_ldaps.append(val)
-    logger.debug("save_team_allocation: reportees_ldaps = %s", reportees_ldaps)
+    # coerce to Decimal for accurate arithmetic
+    try:
+        total_hours_dec = Decimal(str(total_hours_raw or '0.00'))
+    except Exception:
+        total_hours_dec = Decimal('0.00')
 
+    result_weeks = {}
 
-    # upsert weekly allocations as hours calculated from percentage
     try:
         with transaction.atomic():
-            for week_str, pct in weekly.items():
-                try:
-                    week_num = int(week_str)
-                    pct_val = float(pct)
-                except Exception:
-                    continue
-                pct_val = max(0.0, min(100.0, pct_val))
-                hours = int(round((total_hours or 0) * (pct_val / 100.0)))
-                with connection.cursor() as cur:
+            with connection.cursor() as cur:
+                for wk_key, pct_val in weekly.items():
+                    # normalize week number
+                    try:
+                        week_num = int(wk_key)
+                    except Exception:
+                        # skip invalid week keys
+                        continue
+                    # coerce percent to Decimal and clamp
+                    try:
+                        pct_dec = Decimal(str(pct_val))
+                    except Exception:
+                        pct_dec = Decimal('0.00')
+                    if pct_dec < Decimal('0.00'):
+                        pct_dec = Decimal('0.00')
+                    if pct_dec > Decimal('100.00'):
+                        pct_dec = Decimal('100.00')
+
+                    # compute hours = total_hours * (pct/100), quantized to 2 decimals
+                    hours_dec = (total_hours_dec * (pct_dec / Decimal('100.00'))).quantize(
+                        Decimal('0.01'), rounding=ROUND_HALF_UP
+                    )
+
+                    # Upsert percent and hours
                     cur.execute("""
-                        INSERT INTO weekly_allocations (allocation_id, week_number, hours)
-                        VALUES (%s, %s, %s)
-                        ON DUPLICATE KEY UPDATE hours = VALUES(hours), updated_at = CURRENT_TIMESTAMP
-                    """, [allocation_id, week_num, hours])
-        return JsonResponse({"ok": True})
+                        INSERT INTO weekly_allocations (allocation_id, week_number, percent, hours, updated_at)
+                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON DUPLICATE KEY UPDATE
+                          percent = VALUES(percent),
+                          hours = VALUES(hours),
+                          updated_at = CURRENT_TIMESTAMP
+                    """, [allocation_id, week_num, str(pct_dec), str(hours_dec)])
+
+                    # prepare response payload (strings to preserve decimal formatting)
+                    result_weeks[str(week_num)] = format(hours_dec, '0.2f')
+
     except Exception as exc:
-        logger.exception("save_team_allocation failed: %s", exc)
-        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+        # optional: logger.exception("save_team_allocation failed: %s", exc)
+        return JsonResponse({"ok": False, "error": str(exc)})
+
+    return JsonResponse({"ok": True, "allocation_id": allocation_id, "weeks": result_weeks})
+
 # -------------------------
 # my_allocations
 # -------------------------
