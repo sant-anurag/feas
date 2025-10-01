@@ -3,53 +3,69 @@
 {% block content %}
 
 <link rel="stylesheet" href="{% static 'projects/css/monthly_allocations.css' %}">
+
 <style>
-/* IOM detail: compact single-line stats */
-#iomDetailCard { display:flex; justify-content:space-between; align-items:center; gap:18px; margin-top:14px; }
-#iomDetailCard .iom-left { flex:1 1 auto; }
-#iomDetailCard .iom-right { flex:0 0 320px; text-align:right; font-size:0.95rem; color:var(--text); }
-#iomDetailCard .iom-right .stat { display:inline-block; margin-left:12px; color:var(--muted); }
+/* Local styles to ensure a clean, separated layout */
+.alloc-card { background: #fff; padding: 22px; border-radius: 10px; box-shadow: 0 6px 24px rgba(15,35,65,0.06); }
+.alloc-toprow { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:8px; }
+.control label { display:block; font-weight:600; font-size:0.9rem; margin-bottom:6px; color:#475569; }
+.form-control, .form-select { padding:8px 10px; border-radius:8px; border:1px solid #e6eef7; min-height:38px; }
+.btn { padding:6px 12px; border-radius:8px; cursor:pointer; border:none; }
+.btn-outline { background:transparent; border:1px solid #dbeafe; color:#0f172a; }
+.btn-primary { background:#0b5ed7; color:#fff; box-shadow:0 6px 18px rgba(11,94,215,0.12); }
+.btn-compact { padding:6px 10px; font-size:0.95rem; }
 
-/* Make the four stats inline and slightly lighter label */
-#iomDetailCard .iom-right .stat strong { color:var(--text); margin-left:6px; font-weight:600; }
+/* IOM detail (separate card) */
+#iomDetailCard { margin-top:12px; padding:14px; border-radius:8px; background:#f8fbff; border:1px solid #eef7ff; display:flex; justify-content:space-between; gap:16px; }
+#iomDetailCard .left { flex:1; }
+#iomDetailCard .right { flex:0 0 260px; text-align:right; color:#334155; font-size:0.95rem; }
+#iomDetailCard .right .stat { display:block; color:#6b7280; margin-bottom:4px; }
+#iomDetailCard .right .stat strong { color:#0f172a; margin-left:8px; }
 
-/* Resource + Remove: stack Remove button under input to appear as "next line" visually */
-table#allocTable td.resource-td { position:relative; min-width:220px; }
-table#allocTable td.remove-td { width:120px; vertical-align:top; padding-top:6px; }
-table#allocTable td.remove-td .removeBtn { display:inline-block; margin-top:8px; }
-/* ensure on very narrow screens it stacks nicely */
+/* allocations table (separate section) */
+.section-title { margin-top:18px; font-weight:700; color:#0f172a; }
+.table-wrap { margin-top:10px; background:#fff; padding:14px; border-radius:8px; border:1px solid #eef7ff; }
+table#allocTable { width:100%; border-collapse:collapse; }
+table#allocTable thead th { background:#f1f8ff; text-align:left; padding:12px; border-bottom:1px solid #edf2f7; font-weight:700; color:#0f172a; }
+table#allocTable tbody td { padding:10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.resource-td { min-width:260px; position:relative; }
+.remove-td { width:110px; text-align:center; }
+
+/* invalid / over allocated visuals */
+.row-invalid { background:#fff4f6 !important; }
+.iom-over { box-shadow:0 0 0 3px rgba(255,99,71,0.05) inset; }
+.iom-badge { display:inline-block; background:#f1f6ff; border:1px solid #e6f0ff; color:#0b53a0; padding:6px 10px; border-radius:999px; font-weight:600; margin-left:8px; }
+
+/* save tooltip */
+.save-tooltip { position:relative; display:inline-block; }
+.save-tooltip .tooltip-text { display:none; position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%); background:rgba(2,6,23,0.95); color:#fff; padding:10px 12px; border-radius:8px; font-size:0.9rem; max-width:420px; z-index:1400; box-shadow:0 8px 30px rgba(2,6,23,0.2); }
+.save-tooltip:hover .tooltip-text { display:block; }
+
 @media (max-width:900px) {
   #iomDetailCard { flex-direction:column; align-items:flex-start; }
-  #iomDetailCard .iom-right { text-align:left; width:100%; margin-top:10px; }
-  table#allocTable td.remove-td { width:100%; }
-  table#allocTable td.remove-td .removeBtn { width:120px; }
+  #iomDetailCard .right { text-align:left; width:100%; margin-top:10px; }
 }
-
-/* LDAP suggestion z-index and spacing */
-.ldap-suggest { z-index:1200; max-width:420px; }
-
-/* tiny visual tweak to the resource placeholder text */
-input.user_ldap::-webkit-input-placeholder { color:#aab6c6; }
-input.user_ldap::placeholder { color:#aab6c6; }
 </style>
 
 <div class="alloc-card" role="main" aria-labelledby="monthlyAllocationsTitle">
-  <div class="d-flex justify-content-between">
+
+  <div style="display:flex; justify-content:space-between; align-items:flex-start;">
     <div>
-      <h3 id="monthlyAllocationsTitle" class="mb-0">Monthly Allocations</h3>
-      <div class="sub">Manage resources and FTE per IOM</div>
+      <h2 id="monthlyAllocationsTitle" style="margin:0 0 6px 0;">Monthly Allocations</h2>
+      <div style="color:#6b7280; margin-bottom:14px;">Manage resources and FTE per IOM</div>
     </div>
   </div>
 
-  <!-- Top controls -->
-  <div class="alloc-toprow alloc-controls" role="region" aria-label="Filters">
-    <div class="control" style="min-width:260px;">
+  <!-- Filters -->
+  <div class="alloc-toprow" role="region" aria-label="Filters">
+    <div class="control" style="min-width:320px;">
       <label for="projectSelect">Project</label>
-      <select id="projectSelect" class="form-select" aria-label="Select project">
-        {% for p in projects %}
-          <option value="{{ p.id }}" {% if p.id == project_id %}selected{% endif %}>{{ p.name }}</option>
-        {% endfor %}
-        {% if not projects %}
+      <select id="projectSelect" class="form-select" aria-label="Project select">
+        {% if projects %}
+          {% for p in projects %}
+            <option value="{{ p.id }}" {% if project_id and p.id == project_id %}selected{% endif %}>{{ p.name }}</option>
+          {% endfor %}
+        {% else %}
           <option value="">-- No projects assigned --</option>
         {% endif %}
       </select>
@@ -78,83 +94,100 @@ input.user_ldap::placeholder { color:#aab6c6; }
       </select>
     </div>
 
-    <div style="display:flex; gap:8px; align-items:flex-end;">
+    <div style="display:flex; align-items:center; gap:8px;">
       <button id="loadIomsBtn" class="btn btn-primary btn-compact" aria-label="Load IOMs">Load IOMs</button>
     </div>
   </div>
 
   <!-- IOM select + search -->
-  <div class="row mt-3 g-2" role="region" aria-label="IOM selection">
-    <div class="col-md-7">
-      <label class="form-label">Applicable IOMs</label>
-      <div class="form-inline">
-        <select id="iomsDropdown" class="form-select" aria-label="Applicable IOMs">
+  <div style="margin-top:10px; display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+    <div style="flex:1; min-width:360px;">
+      <label for="iomsDropdown">Applicable IOMs</label>
+      <div style="display:flex; gap:8px;">
+        <select id="iomsDropdown" class="form-select" aria-label="Applicable IOMs" style="flex:1;">
           <option value="">-- Load IOMs then select --</option>
         </select>
-        <button id="addIomBtn" class="btn btn-outline btn-compact" aria-label="Add selected IOM">Add Selected IOM</button>
+        <button id="addIomBtn" class="btn btn-outline btn-compact">Add Selected IOM</button>
       </div>
     </div>
-    <div class="col-md-5">
-      <label class="form-label">Search IOM / Dept</label>
-      <input id="searchIom" class="form-control" placeholder="iom id or department" aria-label="Search IOM">
+
+    <div style="width:320px;">
+      <label for="searchIom">Search IOM / Dept</label>
+      <input id="searchIom" class="form-control" placeholder="iom id or department">
     </div>
   </div>
 
-  <!-- IOM detail card: left = title, right = inline stats -->
-  <div id="iomDetailCard" class="card p-3 mt-3" role="region" aria-live="polite" style="display:none; border:1px solid #eef2f7;">
-    <div class="iom-left">
-      <div style="font-weight:700; font-size:1.05rem;" id="iomTitle">IOM: </div>
-      <div class="small-muted" id="iomDept">—</div>
+  <!-- IOM detail card (separate) -->
+  <div id="iomDetailCard" style="display:none; margin-top:14px;" role="region" aria-live="polite">
+    <div id="iomDetailInner" style="display:flex; justify-content:space-between; gap:16px; align-items:center;">
+      <div class="left" style="flex:1; background:#fff; padding:12px; border-radius:8px; border:1px solid #eef7ff;">
+        <div id="iomTitle" style="font-weight:700; font-size:1.02rem;">IOM:</div>
+        <div id="iomDept" style="color:#6b7280; margin-top:6px;">—</div>
+      </div>
+      <div class="right" style="flex:0 0 260px; background:#fff; padding:12px; border-radius:8px; border:1px solid #eef7ff; text-align:right;">
+        <div class="stat">Month FTE: <strong id="iomMonthFte">0.0000</strong></div>
+        <div class="stat">Month Hrs: <strong id="iomMonthHrs">0.00</strong></div>
+        <div class="stat">Remaining FTE: <strong id="iomRemFte">0.0000</strong></div>
+        <div class="stat">Remaining Hrs: <strong id="iomRemHrs">0.00</strong></div>
+      </div>
     </div>
-    <div class="iom-right">
-      <span class="stat">Month FTE:<strong id="iomMonthFte">0.0000</strong></span>
-      <span class="stat">Month Hrs:<strong id="iomMonthHrs">0.00</strong></span>
-      <span class="stat">Remaining FTE:<strong id="iomRemFte">0.0000</strong></span>
-      <span class="stat">Remaining Hrs:<strong id="iomRemHrs">0.00</strong></span>
+  </div>
+
+  <!-- Allocations section (separate from IOM details) -->
+  <div class="section-title">Resource Allocations</div>
+  <div class="table-wrap">
+
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="color:#475569; font-weight:600;">Allocations for selected IOM</div>
+      <div id="allocSectionBadge" style="display:flex; align-items:center; gap:8px;"></div>
     </div>
+
+    <div style="margin-top:10px; overflow:auto;">
+      <table id="allocTable">
+        <thead>
+          <tr>
+            <th style="min-width:260px;">Resource (LDAP)<div style="font-size:0.8rem;color:#94a3b8;">type 3+ chars to search</div></th>
+            <th>Department</th>
+            <th>IOM</th>
+            <th>WBS (Buyer)</th>
+            <th>WBS (Seller)</th>
+            <th style="width:120px;">Total Hrs</th>
+            <th style="width:110px;">Remove</th>
+          </tr>
+        </thead>
+        <tbody id="allocBody">
+          <tr class="empty-state"><td colspan="7">No resources added yet. Load an IOM and click <strong>Add Selected IOM</strong> or use <strong>Add Resource</strong>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:12px; align-items:center;">
+      <button id="addResourceBtn" class="btn btn-outline btn-compact">Add Resource</button>
+
+      <div class="save-tooltip" title="Save allocations">
+        <button id="saveBtn" class="btn btn-primary btn-compact" aria-disabled="false">Save</button>
+        <div class="tooltip-text" id="saveTooltip" aria-hidden="true"></div>
+      </div>
+    </div>
+
   </div>
 
-  <!-- Allocation table -->
-  <div class="table-responsive mt-3" role="region" aria-label="Allocations table">
-    <table class="table table-striped table-hover align-middle" id="allocTable">
-      <thead class="table-light">
-        <tr>
-          <th style="min-width:160px;">Department</th>
-          <th style="min-width:120px;">IOM</th>
-          <th>WBS (Buyer)</th>
-          <th>WBS (Seller)</th>
-          <th style="width:120px;">Total Hrs</th>
-          <th style="min-width:240px;">Resource (LDAP) <div class="small-muted">type 3+ chars to search</div></th>
-          <th style="width:110px;">Remove</th>
-        </tr>
-      </thead>
-      <tbody id="allocBody">
-        <tr class="empty-state"><td colspan="7">No resources added yet. Load an IOM and click <strong>Add Selected IOM</strong> or use <strong>Add Resource</strong>.</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="d-flex gap-2 mt-2">
-    <button id="addResourceBtn" class="btn btn-outline btn-compact" aria-label="Add resource">Add Resource</button>
-    <button id="saveBtn" class="btn btn-primary btn-compact" aria-label="Save allocations">Save</button>
-  </div>
-
-  <div style="display:none">{% csrf_token %}<input id="csrfTokenValue" /></div>
+  <div style="display:none;">{% csrf_token %}</div>
 </div>
 
 <script>
-/*
-  Updated JS:
-  - LDAP fetch URL logged to console for debugging
-  - addIomRow includes classes 'resource-td' and 'remove-td'
-  - autocomplete attach is robust and logs network / results
+/* Full client-side JS:
+   - Uses iom.iom_id (string) consistently when loading/saving allocations
+   - Separate IOM details section and allocations table below
+   - Loads saved allocations immediately when Add Selected IOM is clicked
+   - After Save, server-returned saved items are re-rendered under the IOM
 */
-(function(){
-  const csrftoken = (function(){
-    const el = document.querySelector('input[name="csrfmiddlewaretoken"]');
-    return el ? el.value : (document.cookie.split('; ').find(c=>c.startsWith('csrftoken='))||'').split('=')[1] || '';
-  })();
 
+(function() {
+  const MAX_HOURS_PER_RESOURCE = 183.75;
+  const CSRFTOKEN = document.querySelector('[name="csrfmiddlewaretoken"]').value;
+
+  // DOM
   const projectSelect = document.getElementById('projectSelect');
   const yearInput = document.getElementById('yearInput');
   const monthSelect = document.getElementById('monthSelect');
@@ -162,6 +195,7 @@ input.user_ldap::placeholder { color:#aab6c6; }
   const iomsDropdown = document.getElementById('iomsDropdown');
   const addIomBtn = document.getElementById('addIomBtn');
   const searchIom = document.getElementById('searchIom');
+
   const iomDetailCard = document.getElementById('iomDetailCard');
   const iomTitle = document.getElementById('iomTitle');
   const iomDept = document.getElementById('iomDept');
@@ -169,205 +203,342 @@ input.user_ldap::placeholder { color:#aab6c6; }
   const iomMonthHrs = document.getElementById('iomMonthHrs');
   const iomRemFte = document.getElementById('iomRemFte');
   const iomRemHrs = document.getElementById('iomRemHrs');
+
   const allocBody = document.getElementById('allocBody');
   const addResourceBtn = document.getElementById('addResourceBtn');
   const saveBtn = document.getElementById('saveBtn');
+  const saveTooltipEl = document.getElementById('saveTooltip');
+  const allocSectionBadge = document.getElementById('allocSectionBadge');
 
-  const ldapEndpoint = '{% url "projects:allocations_ldap_search" %}'; // debug-friendly
+  // endpoints (ensure these named urls exist)
+  const LDAP_ENDPOINT = '{% url "projects:allocations_ldap_search" %}';
+  const GET_IOMS_URL = '{% url "projects:get_applicable_ioms" %}';
+  const GET_IOM_DETAILS_URL = '{% url "projects:get_iom_details" %}';
+  const GET_SAVED_ALLOC_URL = '{% url "projects:get_allocations_for_iom" %}';
+  const SAVE_ALLOC_URL = '{% url "projects:save_monthly_allocations" %}';
 
-  function clearTableEmptyState() {
-    const row = allocBody.querySelector('.empty-state');
-    if (row) row.remove();
+  /* Helpers */
+  function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function clearEmptyState(){ const r = allocBody.querySelector('.empty-state'); if(r) r.remove(); }
+  function showIomPreview(iom){
+    iomTitle.textContent = 'IOM: ' + (iom.iom_id || '');
+    iomDept.textContent = iom.department || '';
+    iomMonthFte.textContent = (parseFloat(iom.month_fte||0)).toFixed(4);
+    iomMonthHrs.textContent = (parseFloat(iom.month_hours||0)).toFixed(2);
+    iomRemFte.textContent = (parseFloat(iom.remaining_fte||0)).toFixed(4);
+    iomRemHrs.textContent = (parseFloat(iom.remaining_hours||0)).toFixed(2);
+    iomDetailCard.style.display = 'block';
+    allocSectionBadge.innerHTML = `<span class="iom-badge">Remaining: ${(parseFloat(iom.remaining_hours||iom.month_hours||0)).toFixed(2)}h</span>`;
   }
 
-  loadIomsBtn.addEventListener('click', async () => {
+  /* Load applicable IOMs */
+  async function loadIoms(){
     const project_id = projectSelect.value;
     const year = yearInput.value;
     const month = monthSelect.value;
     const search = searchIom.value.trim();
-    if (!project_id) { alert('Select a project'); return; }
+    if(!project_id){ alert('Select project'); return; }
     const params = new URLSearchParams({ project_id, year, month });
-    if (search) params.set('search', search);
-    try {
-      const resp = await fetch('{% url "projects:get_applicable_ioms" %}?' + params.toString(), { credentials:'same-origin' });
-      if (!resp.ok) throw new Error('Failed to load');
+    if(search) params.set('search', search);
+    try{
+      const resp = await fetch(GET_IOMS_URL + '?' + params.toString(), { credentials:'same-origin' });
       const data = await resp.json();
-      if (!data.ok) throw new Error(data.error || 'No data');
+      if(!data.ok){ console.warn('get_ioms failed', data); alert('Could not load IOMs'); return; }
       iomsDropdown.innerHTML = '<option value="">-- Choose IOM --</option>';
       data.ioms.forEach(i => {
         const opt = document.createElement('option');
+        // store entire iom row as JSON string (use iom_id as primary key)
         opt.value = JSON.stringify(i);
-        opt.text = `${i.iom_id} · Dept:${i.department || '-'} · Hrs:${(i.month_hours||0).toFixed(2)}`;
+        opt.text = `${i.iom_id} · Dept:${i.department || '-'} · Hrs:${(parseFloat(i.month_hours||0)).toFixed(2)}`;
         iomsDropdown.appendChild(opt);
       });
-    } catch (err) {
-      console.error("Load IOMs error:", err);
-      alert('Could not load IOMs (see console)');
-    }
-  });
+    }catch(err){ console.error('loadIoms', err); alert('Load failed (console)'); }
+  }
+
+  loadIomsBtn.addEventListener('click', loadIoms);
 
   iomsDropdown.addEventListener('change', () => {
-    if (!iomsDropdown.value) { iomDetailCard.style.display='none'; return; }
+    if(!iomsDropdown.value){ iomDetailCard.style.display='none'; return; }
     const obj = JSON.parse(iomsDropdown.value);
     showIomPreview(obj);
   });
 
-  addIomBtn.addEventListener('click', () => {
-    if (!iomsDropdown.value) { alert('Select an IOM'); return; }
+  /* Add selected IOM: create header row in table and load saved allocations */
+  addIomBtn.addEventListener('click', async () => {
+    if(!iomsDropdown.value){ alert('Select an IOM'); return; }
     const obj = JSON.parse(iomsDropdown.value);
-    clearTableEmptyState();
-    addIomRow(obj);
-    fetchIomDetails(obj.id);
+    clearEmptyState();
+    addIomHeader(obj);                       // create header row (non-editable)
+    // IMPORTANT: use obj.iom_id (string) to load saved allocations (monthly_allocation_entries.iom_id stores string)
+    await loadSavedAllocations(obj.iom_id);
   });
 
-  function showIomPreview(iom) {
-    iomTitle.innerText = 'IOM: ' + iom.iom_id;
-    iomDept.innerText = iom.department || '';
-    iomMonthFte.innerText = (parseFloat(iom.month_fte||0)).toFixed(4);
-    iomMonthHrs.innerText = (parseFloat(iom.month_hours||0)).toFixed(2);
-    iomRemFte.innerText = (parseFloat(iom.remaining_fte||0)).toFixed(4);
-    iomRemHrs.innerText = (parseFloat(iom.remaining_hours||0)).toFixed(2);
-    iomDetailCard.style.display = 'flex';
+  /* Add IOM header (non-editable row) - appended to allocBody */
+  function addIomHeader(iom){
+    // avoid duplicates
+    if(allocBody.querySelector(`tr.iom-header[data-iom-id="${escapeHtml(iom.iom_id)}"]`)){ return; }
+    const tr = document.createElement('tr');
+    tr.className = 'iom-header';
+    tr.dataset.iomId = iom.iom_id;
+    // store remaining in dataset to be used by validation
+    tr.dataset.remaining = Number(iom.month_hours || 0).toFixed(2);
+    tr.innerHTML = `
+      <td></td>
+      <td style="font-weight:700;">${escapeHtml(iom.department||'')}</td>
+      <td style="font-weight:700;">${escapeHtml(iom.iom_id||'')}</td>
+      <td>${escapeHtml(iom.buyer_wbs_cc||'')}</td>
+      <td>${escapeHtml(iom.seller_wbs_cc||'')}</td>
+      <td style="font-weight:700;">${Number(iom.month_hours||0).toFixed(2)}</td>
+      <td><span class="iom-badge">Remaining: ${Number(iom.month_hours||0).toFixed(2)}h</span></td>
+    `;
+    allocBody.appendChild(tr);
   }
 
+  /* Add resource row under a given IOM - LDAP first column (left aligned) */
+  function addResourceRowFor(iom_id, prefill = {}) {
+    const header = allocBody.querySelector(`tr.iom-header[data-iom-id="${iom_id}"]`);
+    if(!header){ alert('Add the IOM first'); return; }
+    // find insert point after all rows for this IOM
+    let insertAfter = header;
+    let next = header.nextElementSibling;
+    while(next && next.dataset && next.dataset.parentIom === iom_id){ insertAfter = next; next = next.nextElementSibling; }
+
+    const tr = document.createElement('tr');
+    tr.dataset.parentIom = iom_id;
+    tr.innerHTML = `
+      <td class="resource-td">
+        <input type="text" class="form-control user_ldap" placeholder="start typing (3+ chars)" value="${escapeHtml(prefill.ldap||'')}" />
+        <div class="ldap-suggest" style="display:none; position:absolute; left:0; top:44px; z-index:1200; background:#fff; border:1px solid #eef2f7; border-radius:8px; max-height:260px; overflow:auto;"></div>
+      </td>
+      <td>${escapeHtml(prefill.department||'')}</td>
+      <td>${escapeHtml(iom_id)}</td>
+      <td>${escapeHtml(prefill.buyer_wbs||'')}</td>
+      <td>${escapeHtml(prefill.seller_wbs||'')}</td>
+      <td><input type="number" class="form-control resource-hours" step="0.25" min="0" value="${Number(prefill.hours||0).toFixed(2)}" /></td>
+      <td class="remove-td"><button class="btn btn-sm btn-danger removeBtn">Remove</button></td>
+    `;
+    insertAfter.insertAdjacentElement('afterend', tr);
+
+    // event hooks
+    tr.querySelector('.removeBtn').addEventListener('click', () => { tr.remove(); validateAll(); });
+    tr.querySelector('.resource-hours').addEventListener('input', () => { validateAll(); });
+
+    // LDAP autocomplete: query local ldap_directory via LDAP_ENDPOINT?q=
+    const ldapInput = tr.querySelector('.user_ldap');
+    const suggestBox = tr.querySelector('.ldap-suggest');
+    let timer = null;
+    ldapInput.addEventListener('input', () => {
+      const q = ldapInput.value.trim();
+      suggestBox.innerHTML = '';
+      suggestBox.style.display = 'none';
+      if(timer) clearTimeout(timer);
+      if(q.length < 3) return;
+      timer = setTimeout(async () => {
+        try {
+          const url = new URL(LDAP_ENDPOINT, window.location.origin);
+          url.searchParams.set('q', q);
+          const resp = await fetch(url.toString(), { credentials:'same-origin' });
+          if(!resp.ok) return;
+          const data = await resp.json();
+          if(!data || !Array.isArray(data.results)) return;
+          data.results.forEach(r => {
+            const a = document.createElement('a');
+            a.href = '#';
+            a.style.display = 'block';
+            a.style.padding = '8px';
+            a.style.borderBottom = '1px solid #f1f5f9';
+            a.textContent = (r.cn || r.sAMAccountName) + (r.mail ? ' <' + r.mail + '>' : '');
+            a.dataset.mail = r.mail || r.sAMAccountName || '';
+            a.addEventListener('click', (ev) => { ev.preventDefault(); ldapInput.value = a.dataset.mail; suggestBox.style.display = 'none'; validateAll(); });
+            suggestBox.appendChild(a);
+          });
+          if(suggestBox.children.length) suggestBox.style.display = 'block';
+        } catch(err){ console.error('ldap err', err); }
+      }, 200);
+    });
+
+    document.addEventListener('click', (ev) => {
+      if(!tr.contains(ev.target)) suggestBox.style.display = 'none';
+    });
+
+    validateAll();
+  }
+
+  /* Load saved allocations for a given iom_id string (this is key!) */
+  async function loadSavedAllocations(iom_id) {
+    const project_id = projectSelect.value;
+    const month_start = `${yearInput.value}-${String(monthSelect.value).padStart(2,'0')}-01`;
+    if(!project_id || !iom_id) return;
+    try {
+      const url = new URL(GET_SAVED_ALLOC_URL, window.location.origin);
+      url.searchParams.set('project_id', project_id);
+      url.searchParams.set('iom_row_id', iom_id);   // pass the string IOM id (e.g. PEU_2584_...)
+      url.searchParams.set('month_start', month_start);
+      const resp = await fetch(url.toString(), { credentials:'same-origin' });
+      if(!resp.ok) { console.warn('loadSavedAllocations failed', resp.status); return; }
+      const data = await resp.json();
+      if(!data.ok) { console.warn('server: ', data); return; }
+
+      // remove previous resource rows for this IOM and re-render from saved_items
+      const existing = Array.from(allocBody.querySelectorAll('tr')).filter(r => r.dataset && r.dataset.parentIom === iom_id);
+      existing.forEach(r => r.remove());
+      (data.saved_items || []).forEach(s => addResourceRowFor(iom_id, { ldap: s.user_ldap, hours: s.total_hours }));
+      validateAll();
+    } catch(err) { console.error('loadSavedAllocations error', err); }
+  }
+
+  /* Validation + remaining calculations */
+  function validateAll() {
+    const headers = Array.from(allocBody.querySelectorAll('tr.iom-header'));
+    const groups = {};
+    headers.forEach(h => { groups[h.dataset.iomId] = { header: h, rows: [], remaining: parseFloat(h.dataset.remaining||'0')||0 }; h.classList.remove('iom-over'); });
+
+    const resourceRows = Array.from(allocBody.querySelectorAll('tr')).filter(r => r.dataset && r.dataset.parentIom);
+    resourceRows.forEach(r => { const pid = r.dataset.parentIom; if(groups[pid]) groups[pid].rows.push(r); });
+
+    let anyInvalid = false;
+    const reasons = [];
+
+    Object.values(groups).forEach(g => {
+      let sum = 0;
+      g.rows.forEach(r => {
+        r.classList.remove('row-invalid');
+        const hoursEl = r.querySelector('.resource-hours');
+        const ldapEl = r.querySelector('.user_ldap');
+        const hoursVal = parseFloat((hoursEl && hoursEl.value) || 0) || 0;
+        const ldapVal = (ldapEl && ldapEl.value || '').trim();
+
+        const rowErr = [];
+        if(!ldapVal) rowErr.push('missing LDAP');
+        if(!(hoursVal > 0)) rowErr.push('hours must be > 0');
+        if(hoursVal > MAX_HOURS_PER_RESOURCE) rowErr.push(`hours > ${MAX_HOURS_PER_RESOURCE}`);
+
+        if(rowErr.length) { r.classList.add('row-invalid'); anyInvalid = true; reasons.push(`IOM ${g.header.dataset.iomId}: ${rowErr.join(', ')}`); }
+        sum += hoursVal;
+      });
+
+      const badge = g.header.querySelector('.iom-badge');
+      const remainingLeft = (g.remaining - sum);
+      if(badge) badge.textContent = 'Remaining: ' + remainingLeft.toFixed(2) + 'h';
+
+      if(sum > g.remaining) { g.header.classList.add('iom-over'); g.rows.forEach(r => r.classList.add('row-invalid')); anyInvalid = true; reasons.push(`IOM ${g.header.dataset.iomId} over-allocated by ${(sum - g.remaining).toFixed(2)} hrs`); }
+    });
+
+    // if no resource rows => cannot save
+    if(resourceRows.length === 0) { anyInvalid = true; reasons.push('No resource rows added yet'); }
+
+    // toggle save button and tooltip
+    if(anyInvalid) {
+      saveBtn.disabled = true;
+      saveBtn.setAttribute('aria-disabled', 'true');
+      saveTooltipEl.textContent = reasons.join('; ');
+      saveTooltipEl.parentElement.setAttribute('aria-hidden', 'false');
+    } else {
+      saveBtn.disabled = false;
+      saveBtn.setAttribute('aria-disabled', 'false');
+      saveTooltipEl.textContent = '';
+      saveTooltipEl.parentElement.setAttribute('aria-hidden', 'true');
+    }
+    return !anyInvalid;
+  }
+
+  /* Save allocations -> send items and re-render saved rows (server returns saved grouped by iom_id) */
+  async function saveAllocations() {
+    if(!validateAll()) { alert('Fix highlighted rows before saving (see tooltip)'); return; }
+    const project_id = projectSelect.value;
+    if(!project_id) { alert('Select project'); return; }
+    const month_start = `${yearInput.value}-${String(monthSelect.value).padStart(2,'0')}-01`;
+
+    const resourceRows = Array.from(allocBody.querySelectorAll('tr')).filter(r => r.dataset && r.dataset.parentIom);
+    const items = resourceRows.map(r => ({
+      iom_id: r.dataset.parentIom,
+      user_ldap: (r.querySelector('.user_ldap') || {}).value || '',
+      total_hours: Math.round(parseFloat((r.querySelector('.resource-hours') || {}).value || 0))
+    }));
+
+    try {
+      const resp = await fetch(SAVE_ALLOC_URL, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRFTOKEN },
+        body: JSON.stringify({ project_id, month_start, items })
+      });
+      const data = await resp.json();
+      if(!data.ok) { alert('Save failed: ' + (data.error || 'server error')); console.error('save err', data); return; }
+
+      // server returns saved grouped by iom_id: { saved: { iom_id: [ {user_ldap, total_hours}, ... ], ... } }
+      if(data.saved && typeof data.saved === 'object') {
+        Object.keys(data.saved).forEach(iomId => {
+          // remove current resource rows for that IOM and render saved ones
+          const existing = Array.from(allocBody.querySelectorAll('tr')).filter(r => r.dataset && r.dataset.parentIom === iomId);
+          existing.forEach(r => r.remove());
+          (data.saved[iomId] || []).forEach(s => addResourceRowFor(iomId, { ldap: s.user_ldap, hours: s.total_hours }));
+        });
+        validateAll();
+        // refresh iom details for updated remaining values
+        Object.keys(data.saved).forEach(iomId => fetchIomDetails(iomId));
+        alert('Saved allocations successfully');
+      } else {
+        console.warn('unexpected save response', data);
+        alert('Saved (server responded differently).');
+      }
+    } catch(err) {
+      console.error('saveAllocations error', err);
+      alert('Save failed (see console).');
+    }
+  }
+
+  /* Fetch IOM details (optional refresh) */
   async function fetchIomDetails(iom_row_id) {
     try {
       const project_id = projectSelect.value;
       const year = yearInput.value;
       const month = monthSelect.value;
-      const resp = await fetch('{% url "projects:get_iom_details" %}?iom_row_id=' + encodeURIComponent(iom_row_id) + '&project_id=' + encodeURIComponent(project_id) + '&year=' + year + '&month=' + month, { credentials:'same-origin' });
-      if (!resp.ok) return;
+      if(!project_id || !iom_row_id) return;
+      const url = new URL(GET_IOM_DETAILS_URL, window.location.origin);
+      url.searchParams.set('project_id', project_id);
+      url.searchParams.set('iom_row_id', iom_row_id);
+      url.searchParams.set('year', year);
+      url.searchParams.set('month', month);
+      const resp = await fetch(url.toString(), { credentials:'same-origin' });
+      if(!resp.ok) return;
       const data = await resp.json();
-      if (!data.ok) return;
+      if(!data.ok) return;
       const iom = data.iom;
-      showIomPreview(iom);
-    } catch (err) {
-      console.warn('iom details', err);
-    }
-  }
-
-  function addIomRow(iom) {
-    // avoid duplicate iom row
-    if ([...allocBody.children].some(tr => tr.dataset.iomId == iom.iom_id)) { alert('IOM already added'); return; }
-
-    const html = `
-      <tr data-iom-id="${iom.iom_id}">
-        <td><input class="form-control dept" value="${(iom.department||'').replace(/"/g,'&quot;')}" /></td>
-        <td><input class="form-control iom_id" value="${iom.iom_id}" readonly /></td>
-        <td><input class="form-control wbs_buyer" value="${(iom.buyer_wbs_cc||'').replace(/"/g,'&quot;')}" /></td>
-        <td><input class="form-control wbs_seller" value="${(iom.seller_wbs_cc||'').replace(/"/g,'&quot;')}" /></td>
-        <td><input class="form-control total_hrs" type="number" value="${parseFloat(iom.month_hours||0).toFixed(2)}" min="0" /></td>
-
-        <!-- resource and its suggestion box (resource-td) -->
-        <td class="resource-td">
-          <input class="form-control user_ldap" placeholder="start typing (3+ chars)" aria-label="user ldap"/>
-          <div class="ldap-suggest" style="display:none;"></div>
-        </td>
-
-        <!-- remove placed in its own column, will be visually below resource due to CSS -->
-        <td class="remove-td">
-          <button class="btn btn-sm btn-danger removeBtn btn-compact" aria-label="Remove resource">Remove</button>
-        </td>
-      </tr>
-    `;
-    const tr = document.createElement('tr');
-    tr.innerHTML = html;
-    const empty = allocBody.querySelector('.empty-state');
-    if (empty) empty.remove();
-    allocBody.appendChild(tr);
-    tr.dataset.iomId = iom.iom_id;
-
-    // attach remove
-    const removeBtn = tr.querySelector('.removeBtn');
-    removeBtn.addEventListener('click', () => tr.remove());
-
-    // LDAP autocomplete - attach to the new input
-    const ldapInput = tr.querySelector('.user_ldap');
-    const suggestBox = tr.querySelector('.ldap-suggest');
-    let timer = null;
-
-    ldapInput.addEventListener('input', () => {
-      const q = ldapInput.value.trim();
-      suggestBox.innerHTML = '';
-      suggestBox.style.display = 'none';
-      if (timer) clearTimeout(timer);
-      if (q.length < 3) return; // client-enforced minimum
-
-      timer = setTimeout(async () => {
-        try {
-          const url = ldapEndpoint + '?q=' + encodeURIComponent(q);
-          console.log('LDAP query:', url);
-          const resp = await fetch(url, { credentials: 'same-origin' });
-          if (!resp.ok) {
-            console.warn('LDAP request failed', resp.status);
-            return;
-          }
-          const data = await resp.json();
-          if (!data || !Array.isArray(data.results)) {
-            console.warn('LDAP unexpected response', data);
-            return;
-          }
-          // show results
-          data.results.forEach(r => {
-            const a = document.createElement('a');
-            a.href = '#';
-            a.className = 'list-group-item list-group-item-action';
-            // display-friendly: prefer "cn (mail)" or username
-            a.textContent = (r.cn || r.sAMAccountName) + (r.mail ? ' <' + r.mail + '>' : '');
-            a.dataset.mail = r.mail || r.sAMAccountName || '';
-            a.onclick = (e) => { e.preventDefault(); ldapInput.value = a.dataset.mail; suggestBox.style.display='none'; };
-            suggestBox.appendChild(a);
-          });
-          if (suggestBox.children.length) suggestBox.style.display = 'block';
-        } catch (err) {
-          console.error('LDAP fetch error', err);
+      if(iom) {
+        // update preview if visible
+        showIomPreview(iom);
+        // update header remaining dataset + badge if header exists
+        const header = allocBody.querySelector(`tr.iom-header[data-iom-id="${iom.iom_id}"]`);
+        if(header) {
+          header.dataset.remaining = Number(iom.remaining_hours || iom.month_hours || 0).toFixed(2);
+          const badge = header.querySelector('.iom-badge');
+          if(badge) badge.textContent = 'Remaining: ' + Number(iom.remaining_hours || iom.month_hours || 0).toFixed(2) + 'h';
+          validateAll();
         }
-      }, 220);
-    });
-
-    // hide suggestion box when click outside
-    document.addEventListener('click', (ev) => { if (!tr.contains(ev.target)) suggestBox.style.display='none'; });
+      }
+    } catch(err) { console.warn('fetchIomDetails', err); }
   }
 
+  /* wiring */
   addResourceBtn.addEventListener('click', () => {
-    addIomRow({ iom_id:'', department:'', buyer_wbs_cc:'', seller_wbs_cc:'', month_hours:0 });
+    const lastHeader = Array.from(allocBody.querySelectorAll('tr.iom-header')).pop();
+    if(!lastHeader) { alert('Add an IOM first'); return; }
+    addResourceRowFor(lastHeader.dataset.iomId);
   });
 
-  saveBtn.addEventListener('click', async () => {
-    const project_id = projectSelect.value;
-    if (!project_id) { alert('Select project'); return; }
-    const year = yearInput.value;
-    const month = monthSelect.value;
-    const month_start = `${year}-${String(month).padStart(2,'0')}-01`;
+  saveBtn.addEventListener('click', saveAllocations);
 
-    const rows = Array.from(allocBody.querySelectorAll('tr'));
-    if (!rows.length) { alert('Nothing to save'); return; }
+  // realtime validation on input (simple)
+  document.addEventListener('input', (ev) => { validateAll(); });
 
-    const items = [];
-    for (const r of rows) {
-      if (r.classList.contains('empty-state')) continue;
-      const user_ldap = (r.querySelector('.user_ldap') || {}).value || '';
-      const total_hours = Math.round(parseFloat((r.querySelector('.total_hrs') || {}).value || 0));
-      items.push({ coe_id: 0, domain_id: 0, user_ldap: user_ldap, total_hours: total_hours });
-    }
-
-    try {
-      const resp = await fetch('{% url "projects:save_monthly_allocations" %}', {
-        method:'POST',
-        credentials:'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-        body: JSON.stringify({ project_id, month_start, items })
-      });
-      const data = await resp.json();
-      if (!data.ok) { alert('Save failed: ' + (data.error || 'unknown')); return; }
-      alert('Saved successfully');
-      location.reload();
-    } catch (err) {
-      console.error(err);
-      alert('Save failed (open console)');
-    }
-  });
+  // On page load, if a project is present we can auto-load IOMs optionally
+  (function init() {
+    // optionally load IOMs automatically:
+    // if(projectSelect && projectSelect.value) loadIoms();
+  })();
 
 })();
 </script>
+
 {% endblock %}

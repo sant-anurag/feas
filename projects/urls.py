@@ -30,7 +30,6 @@ urlpatterns = [
     path("map-coes/", views.map_coes, name="map_coes"),
     path("api/coes/", views.api_coes, name="api_coes"),
     path("api/projects/", views.api_projects, name="api_projects"),
-    path("allocations/monthly/save/", views.save_monthly_allocations, name="save_monthly_allocations"),
     path("team-allocations/", views.team_allocations, name="team_allocations"),
     path("team-allocations/save/", views.save_team_allocation, name="save_team_allocation"),
 
@@ -42,7 +41,11 @@ urlpatterns = [
     path('get_iom_details/', views.get_iom_details, name='get_iom_details'),
     path('allocations_ldap_search/', views.ldap_search, name='allocations_ldap_search'),
     # ensure save_monthly_allocations and save_team_allocation exist and are named accordingly in urls
-    path('projects/save/', views.save_monthly_allocations, name='save_monthly_allocations'),
+
     path('projects/team-allocations/save/', views.save_team_allocation, name='save_team_allocation'),
+
+    path('get_allocations_for_iom/', views.get_allocations_for_iom, name='get_allocations_for_iom'),
+    path('save_monthly_allocations/', views.save_monthly_allocations, name='save_monthly_allocations'),
+    # replace/override existing if present
 
 ]

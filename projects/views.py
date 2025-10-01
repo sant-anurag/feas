@@ -24,6 +24,11 @@ from mysql.connector import Error, IntegrityError
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.db import connection
 from datetime import datetime
+from django.views.decorators.http import require_GET, require_POST
+from django.http import JsonResponse
+from django.db import connection, transaction
+import json
+
 
 PAGE_SIZE = 10
 # -------------------------
@@ -1036,243 +1041,45 @@ def api_projects(request):
         p['mapped_coe_count'] = counts.get(p['id'], 0)
     return JsonResponse({"projects": projects})
 
-# -------------------------
-# save_monthly_allocations
-# -------------------------
+@require_GET
+def get_allocations_for_iom(request):
+    project_id = request.GET.get("project_id")
+    iom_row_id = request.GET.get("iom_row_id")
+    month_start = request.GET.get("month_start")
+    if not (project_id and iom_row_id and month_start):
+        return JsonResponse({"ok": False, "error": "missing params"}, status=400)
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT user_ldap, total_hours
+            FROM monthly_allocation_entries
+            WHERE project_id=%s AND iom_id=%s AND month_start=%s
+        """, (project_id, iom_row_id, month_start))
+        rows = cur.fetchall()
+    return JsonResponse({"ok": True, "saved_items": [{"user_ldap":r[0],"total_hours":r[1]} for r in rows]})
+
 @require_POST
 def save_monthly_allocations(request):
-    """
-    Save monthly allocations payload from UI.
-
-    Enhancements:
-      - Canonicalize incoming user identifiers to LDAP login (userPrincipalName / mail)
-      - Use request.session['ldap_username'] as canonical session identity
-      - When necessary, resolve short samAccountName via local users table or via LDAP lookup
-      - Always store users.username and users.ldap_id = canonical_login
-    """
-    session_ldap = request.session.get("ldap_username")
-    session_pwd = request.session.get("ldap_password")
-    logger.debug("save_monthly_allocations - session_ldap: %s", session_ldap)
-
     try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except Exception:
-        return HttpResponseBadRequest("Invalid JSON")
-
-    project_id = payload.get("project_id")
-    month_start = payload.get("month_start")
-    items = payload.get("items", [])
-
-    if not project_id or not month_start:
-        return HttpResponseBadRequest("project_id and month_start are required")
-
-    try:
-        month_date = datetime.strptime(month_start, "%Y-%m-%d").date()
-    except Exception:
-        return HttpResponseBadRequest("month_start must be YYYY-MM-01")
-
-    # Authorization: only PDL for project (by ldap_id) or admin
-    with connection.cursor() as cur:
-        cur.execute("SELECT pdl_user_id FROM projects WHERE id = %s LIMIT 1", [project_id])
-        row = cur.fetchone()
-        if not row:
-            return HttpResponseBadRequest("Invalid project")
-        pdl_user_id = row[0]
-        cur.execute("SELECT id FROM users WHERE ldap_id = %s LIMIT 1", [session_ldap])
-        urow = cur.fetchone()
-        session_user_id = urow[0] if urow else None
-        if pdl_user_id != session_user_id and request.user.username != 'admin':
-            return HttpResponseForbidden("You are not authorized to save allocations for this project")
-
-    # Helper to canonicalize an incoming ldap identifier (may be short samAccountName or canonical login)
-    def _canonicalize_user_identifier(candidate: str):
-        """
-        Return canonical LDAP login (userPrincipalName or mail) for candidate.
-        Strategy:
-          1) If candidate already contains '@' -> assume canonical and return it.
-          2) Check local users table: if users.ldap_id exists for users.username == candidate -> return users.ldap_id
-          3) Attempt LDAP lookup using accounts.ldap_utils.get_user_entry_by_username(candidate, creds)
-             - prefer attributes userPrincipalName, mail
-          4) If all fails, return original candidate (but log warning)
-        """
-        if not candidate:
-            return candidate
-        cand = candidate.strip()
-        if "@" in cand:
-            return cand  # already canonical
-        # 2) local DB mapping: if there is a users row with username = cand and ldap_id looks canonical, use it
-        try:
-            with connection.cursor() as cur:
-                cur.execute("SELECT ldap_id FROM users WHERE username = %s LIMIT 1", [cand])
-                r = cur.fetchone()
-                if r and r[0]:
-                    ldap_val = (r[0] or "").strip()
-                    if ldap_val and "@" in ldap_val:
-                        return ldap_val
-        except Exception:
-            logger.exception("Error checking local users mapping for %s", cand)
-
-        # 3) LDAP lookup using credentials from session (if available)
-        try:
-            creds = (session_ldap, session_pwd) if session_ldap and session_pwd else None
-            # get_user_entry_by_username should accept samAccountName or UPN
-            user_entry = None
-            try:
-                user_entry = get_user_entry_by_username(cand, username_password_for_conn=creds)
-            except Exception:
-                logger.exception("LDAP lookup failed for %s", cand)
-                user_entry = None
-
-            if user_entry:
-                # try to get userPrincipalName or mail attribute from LDAP entry
-                # Note: entries may be ldap3 objects, dicts, or similar - handle both cases
-                upn = None
-                mail = None
-                try:
-                    # if ldap3 Entry: attributes accessible via .entry_attributes_as_dict or .get
-                    if hasattr(user_entry, "entry_attributes_as_dict"):
-                        attrs = user_entry.entry_attributes_as_dict
-                        upn = attrs.get("userPrincipalName") or attrs.get("mail")
-                        # attrs may be lists; take first
-                        if isinstance(upn, (list, tuple)):
-                            upn = upn[0] if upn else None
-                    else:
-                        # assume dict-like
-                        upn = user_entry.get("userPrincipalName") or user_entry.get("mail")
-                        if isinstance(upn, (list, tuple)):
-                            upn = upn[0] if upn else None
-                except Exception:
-                    logger.exception("Error extracting attributes from LDAP entry for %s", cand)
-                    upn = None
-
-                if upn:
-                    upn_val = upn.strip()
-                    if upn_val:
-                        return upn_val
-        except Exception:
-            logger.exception("LDAP resolution error for %s", cand)
-
-        # fallback - return original (legacy short name); caller may still insert it but we log warning
-        logger.warning("Could not canonicalize '%s' to UPN/mail; storing as-is (legacy).", cand)
-        return cand
-
-    # canonicalize items list in memory first
-    canonical_items = []
+        data=json.loads(request.body)
+    except: return JsonResponse({"ok":False,"error":"invalid json"},status=400)
+    project_id=data.get("project_id"); month_start=data.get("month_start"); items=data.get("items",[])
+    if not(project_id and month_start): return JsonResponse({"ok":False,"error":"missing params"},status=400)
+    grouped={}
     for it in items:
-        # preserve original structure but canonicalize user_ldap if present
-        coe_id = it.get("coe_id")
-        domain_id = it.get("domain_id")
-        total_hours = it.get("total_hours") or 0
-        raw_user = (it.get("user_ldap") or "").strip()
-        canonical_user = _canonicalize_user_identifier(raw_user) if raw_user else ""
-        canonical_items.append({
-            "coe_id": coe_id,
-            "domain_id": domain_id,
-            "user_ldap": canonical_user,
-            "total_hours": int(total_hours or 0)
-        })
+        iom_id=it.get("iom_id"); ldap=(it.get("user_ldap") or "").strip(); hrs=int(it.get("total_hours") or 0)
+        if not iom_id or not ldap or hrs<=0: continue
+        grouped.setdefault(iom_id,[]).append((ldap,hrs))
+    saved={}
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            for iom_id,rows in grouped.items():
+                cur.execute("DELETE FROM monthly_allocation_entries WHERE project_id=%s AND iom_id=%s AND month_start=%s",(project_id,iom_id,month_start))
+                for ldap,hrs in rows:
+                    cur.execute("INSERT INTO monthly_allocation_entries(project_id,iom_id,month_start,user_ldap,total_hours) VALUES(%s,%s,%s,%s,%s)",(project_id,iom_id,month_start,ldap,hrs))
+                cur.execute("SELECT user_ldap,total_hours FROM monthly_allocation_entries WHERE project_id=%s AND iom_id=%s AND month_start=%s",(project_id,iom_id,month_start))
+                saved[iom_id]=[{"user_ldap":r[0],"total_hours":r[1]} for r in cur.fetchall()]
+    return JsonResponse({"ok":True,"saved":saved})
 
-    # Now proceed to upsert using canonical_items
-    try:
-        with transaction.atomic():
-            ldap_to_alloc_id = {}
-            unique_ldaps = sorted({ci["user_ldap"] for ci in canonical_items if ci.get("user_ldap")})
-            for ldap in unique_ldaps:
-                if not ldap:
-                    continue
-                with connection.cursor() as cur:
-                    # ensure user exists with ldap_id = canonical ldap
-                    cur.execute("SELECT id, ldap_id FROM users WHERE ldap_id = %s LIMIT 1", [ldap])
-                    u = cur.fetchone()
-                    if u:
-                        user_id = u[0]
-                    else:
-                        # create user record with username=ldap and ldap_id=ldap
-                        cur.execute(
-                            "INSERT INTO users (username, ldap_id, role, created_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)",
-                            [ldap, ldap, 'EMPLOYEE']
-                        )
-                        user_id = cur.lastrowid
-
-                    # upsert allocation (one per user/project/month)
-                    cur.execute("SELECT id FROM allocations WHERE user_id = %s AND project_id = %s AND month_start = %s LIMIT 1",
-                                [user_id, project_id, month_date])
-                    a = cur.fetchone()
-                    if a:
-                        alloc_id = a[0]
-                    else:
-                        cur.execute("INSERT INTO allocations (user_id, project_id, month_start, total_hours, pending_hours) VALUES (%s, %s, %s, 0, 0)",
-                                    [user_id, project_id, month_date])
-                        alloc_id = cur.lastrowid
-                    ldap_to_alloc_id[ldap] = (alloc_id, user_id)
-
-            # Now upsert allocation_items using canonical ldap->alloc mapping
-            incoming_keys = set()
-            for it in canonical_items:
-                ldap = it.get("user_ldap")
-                if not ldap:
-                    continue
-                mapping = ldap_to_alloc_id.get(ldap)
-                if not mapping:
-                    # unexpected; skip
-                    continue
-                alloc_id, user_id = mapping
-                coe_id = int(it.get("coe_id")) if it.get("coe_id") else None
-                domain_id = int(it.get("domain_id")) if it.get("domain_id") else None
-                hours = int(it.get("total_hours") or 0)
-
-                if not coe_id:
-                    continue
-
-                incoming_keys.add((alloc_id, coe_id, user_id))
-
-                with connection.cursor() as cur:
-                    cur.execute("""
-                        SELECT id FROM allocation_items
-                        WHERE allocation_id = %s AND coe_id = %s AND user_id = %s LIMIT 1
-                    """, [alloc_id, coe_id, user_id])
-                    ex = cur.fetchone()
-                    if ex:
-                        item_id = ex[0]
-                        cur.execute("""
-                            UPDATE allocation_items
-                            SET domain_id = %s, total_hours = %s, user_ldap = %s, updated_at = CURRENT_TIMESTAMP
-                            WHERE id = %s
-                        """, [domain_id, hours, ldap, item_id])
-                    else:
-                        cur.execute("""
-                            INSERT INTO allocation_items (allocation_id, project_id, coe_id, domain_id, user_id, user_ldap, total_hours)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """, [alloc_id, project_id, coe_id, domain_id, user_id, ldap, hours])
-
-            # Delete allocation_items for this project+month not present in incoming_keys
-            with connection.cursor() as cur:
-                cur.execute("""
-                    SELECT ai.id, ai.allocation_id, ai.coe_id, ai.user_id
-                    FROM allocation_items ai
-                    JOIN allocations a ON ai.allocation_id = a.id
-                    WHERE ai.project_id = %s AND a.month_start = %s
-                """, [project_id, month_date])
-                existing_items = cur.fetchall()
-                for item in existing_items:
-                    ai_id, alloc_id, coe_id, user_id = item
-                    if (alloc_id, coe_id, user_id) not in incoming_keys:
-                        cur.execute("DELETE FROM allocation_items WHERE id = %s", [ai_id])
-
-            # Recompute allocation.total_hours per allocation
-            with connection.cursor() as cur:
-                cur.execute("SELECT a.id FROM allocations a WHERE a.project_id = %s AND a.month_start = %s", [project_id, month_date])
-                alloc_rows = cur.fetchall()
-                for ar in alloc_rows:
-                    aid = ar[0]
-                    cur.execute("SELECT COALESCE(SUM(total_hours),0) FROM allocation_items WHERE allocation_id = %s", [aid])
-                    total = cur.fetchone()[0] or 0
-                    cur.execute("UPDATE allocations SET total_hours = %s, pending_hours = %s WHERE id = %s", [total, total, aid])
-
-        return JsonResponse({"ok": True, "message": "Allocations saved with canonical ldap identifiers."})
-    except Exception as exc:
-        logger.exception("save_monthly_allocations failed: %s", exc)
-        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
 # -------------------------
 # team_allocations
@@ -2098,9 +1905,6 @@ def get_applicable_ioms(request):
         params.extend(creator_lower_vals)
 
     sql += " ORDER BY iom_id LIMIT 500"
-
-    print("[get_applicable_ioms] sql:", sql)
-    print("[get_applicable_ioms] params:", params)
 
     try:
         with connection.cursor() as cur:
