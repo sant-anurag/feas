@@ -33,7 +33,6 @@ urlpatterns = [
     path("team-allocations/", views.team_allocations, name="team_allocations"),
     path("team-allocations/save/", views.save_team_allocation, name="save_team_allocation"),
 
-    path("my-allocations/", views.my_allocations, name="my_allocations"),
     path("my-allocations/update-status/", views.my_allocations_update_status, name="my_allocations_update_status"),
 
     path('monthly_allocations/', views.monthly_allocations, name='monthly_allocations'),
@@ -47,4 +46,7 @@ urlpatterns = [
     path('get_allocations_for_iom/', views.get_allocations_for_iom, name='get_allocations_for_iom'),
     path('save_monthly_allocations/', views.save_monthly_allocations, name='save_monthly_allocations'),
     path("export_allocations/", views.export_allocations, name="export_allocations"),
+    path('my-allocations/', views.my_allocations, name='my_allocations'),
+    path('my-allocations/save-weekly/', views.save_my_alloc_weekly, name='save_my_alloc_weekly'),
+    path('my-allocations/save-daily/', views.save_my_alloc_daily, name='save_my_alloc_daily'),
 ]

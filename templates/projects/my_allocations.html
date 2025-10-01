@@ -1,249 +1,345 @@
 {% extends "base.html" %}
 {% load static %}
+{% load dict_get %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<link rel="stylesheet" href="{% static 'css/team_allocations.css' %}">
 <style>
 .container { max-width:1200px; margin:18px auto; }
 .panel { background:#fff; border-radius:10px; padding:18px; box-shadow:0 8px 20px rgba(2,6,23,0.04); }
-.project-block { margin-bottom:18px; border-radius:8px; background:#fff; padding:14px; border:1px solid #f1f5f9; }
-.project-title { font-weight:800; margin-bottom:10px; color:#0b2447; }
-.alloc-table { width:100%; border-collapse:collapse; }
+
+.controls-row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+
+/* reuse the page-controls/control-card classes from team_allocations.css */
+.page-controls { display:flex; gap:12px; align-items:center; justify-content:flex-end; margin-bottom:8px; }
+.control-card { display:inline-flex; gap:10px; align-items:center; padding:8px 12px; border-radius:12px; background:linear-gradient(180deg, rgba(255,255,255,0.9), rgba(250,250,255,0.85)); border:1px solid rgba(15,23,42,0.04); box-shadow:0 6px 18px rgba(12,36,75,0.06); }
+.ctrl-label { color:#374151; font-size:13px; margin-right:6px; white-space:nowrap; }
+.input-month { min-width:150px; padding:8px 10px; border-radius:10px; border:1px solid rgba(203,213,225,0.8); background:linear-gradient(180deg,#ffffff,#fbfdff); font-size:14px; }
+.btn-load { background: linear-gradient(90deg, #1e3a8a 0%, #2563eb 60%); color: #fff; padding: 9px 16px; border-radius: 10px; font-weight:700; border:none; cursor:pointer; box-shadow:0 8px 20px rgba(37,99,235,0.18); }
+
+/* toggles */
+.toggle-controls { display:flex; gap:8px; margin-bottom:12px; }
+.btn-toggle { padding:8px 12px; border-radius:8px; border:1px solid #e6eaf0; background:#fff; cursor:pointer; font-weight:700; }
+.btn-toggle.active { background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; border:none; box-shadow:0 8px 20px rgba(37,99,235,0.12); }
+
+/* allocations table */
+.alloc-table { width:100%; border-collapse:collapse; margin-top:10px; }
 .alloc-table th, .alloc-table td { padding:10px 12px; border-bottom:1px solid #eef2f7; vertical-align:middle; text-align:left; }
-.alloc-table thead th { background:#fafafa; font-weight:800; }
-.week-input { width:100px; padding:8px; border-radius:6px; border:1px solid #e6eaf0; }
-.btn { padding:8px 12px; border-radius:8px; font-weight:800; cursor:pointer; }
-.btn-save { background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; border:none; }
-.btn-reset { background:#fff; border:1px solid rgba(10,30,80,0.08); color:#0b1320; }
-.icon-btn { border:none; background:transparent; font-size:18px; cursor:pointer; margin-left:8px; }
-.status-accepted { background: rgba(16,185,129,0.08); border-radius:6px; padding:6px; color:#065f46; }
-.status-rejected { background: rgba(239,68,68,0.06); border-radius:6px; padding:6px; color:#991b1b; }
+.alloc-table thead th { background:#f8fafc; font-weight:700; color:#374151; }
+
+.week-punch { width:88px; padding:6px; border-radius:6px; border:1px solid #d1d5db; }
+
+.daily-grid { width:100%; border-collapse:collapse; margin-top:12px; }
+.daily-grid th, .daily-grid td { padding:8px; border-bottom:1px solid #f3f4f6; }
+
+.remaining {
+  font-size:12px; font-weight:700; padding:3px 6px; border-radius:6px;
+  display:inline-block; margin-left:8px;
+}
+.remaining.safe { background: rgba(16,185,129,0.12); color: #065f46; }
+.remaining.warn { background: rgba(245,158,11,0.12); color:#92400e; }
+.remaining.over { background: rgba(239,68,68,0.12); color:#991b1b; }
+
 .small-muted { color:#6b7280; font-size:13px; }
-.right { text-align:right; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container">
-  <div class="panel">
-    <h2>My Allocations — {{ month_start|date:"F Y" }}</h2>
-    <p class="small-muted">Your allocations for this month. Accept or Reject weekly entries assigned by your Team Lead.</p>
+  <div class="panel" role="main" aria-labelledby="myAllocTitle">
+    <div class="controls-row">
+      <div>
+        <h2 id="myAllocTitle">My Allocations — {{ month_start|date:"F Y" }}</h2>
+        <p class="small-muted">Toggle between Weekly and Daily punching views. You cannot punch more than the allocated hours for the week.</p>
+      </div>
 
-    {% if not rows %}
-      <div style="padding:18px;border-radius:8px;background:#fff;">No allocations found for you this month.</div>
-    {% else %}
-      {# group by project #}
-      {% regroup rows by project_name as projects %}
-      {% for proj in projects %}
-        <div class="project-block">
-          <div class="project-title">{{ proj.grouper }}</div>
-          <table class="alloc-table">
-            <thead>
-              <tr>
-                <th style="width:260px">Resource</th>
-                <th style="width:160px">Domain</th>
-                <th style="width:120px">Allocated Hrs</th>
-                <th style="width:110px">Week 1</th>
-                <th style="width:110px">Week 2</th>
-                <th style="width:110px">Week 3</th>
-                <th style="width:110px">Week 4</th>
-                <th style="width:160px">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for r in proj.list %}
+      <!-- top-right month controls: submits ?month=YYYY-MM -->
+      <div class="page-controls" aria-label="Month controls">
+        <form method="get" class="control-card" style="align-items:center;">
+          <label class="ctrl-label">Select month</label>
+          <input class="input-month" type="month" name="month" value="{{ month_start|date:'Y-m' }}">
+          <button class="btn-load" type="submit">Load</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="toggle-controls" role="tablist" aria-label="View toggle">
+      <button id="btn-weekly" class="btn-toggle active" role="tab" aria-selected="true">Weekly View</button>
+      <button id="btn-daily" class="btn-toggle" role="tab" aria-selected="false">Daily View</button>
+    </div>
+
+    <!-- WEEKLY VIEW -->
+    <div id="weekly-view" role="tabpanel" aria-labelledby="btn-weekly">
+      {% if not rows %}
+        <div style="padding:18px;border-radius:8px;background:#fff;">No allocations found for you this month.</div>
+      {% else %}
+        <table class="alloc-table" aria-describedby="WeeklyAllocTable">
+          <thead>
+            <tr>
+              <th>Project</th>
+              <th>Domain</th>
+              <th>Allocated (Total)</th>
+              <th>W1 Alloc</th><th>W1 Punched</th><th>W1 Punch</th>
+              <th>W2 Alloc</th><th>W2 Punched</th><th>W2 Punch</th>
+              <th>W3 Alloc</th><th>W3 Punched</th><th>W3 Punch</th>
+              <th>W4 Alloc</th><th>W4 Punched</th><th>W4 Punch</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
               <tr data-allocation="{{ r.allocation_id }}">
-                <td>
-                  <div style="font-weight:700;">{{ display_name }}</div>
-                  <div class="small-muted">You</div>
-                </td>
+                <td style="min-width:180px;">{{ r.project_name }}</td>
                 <td>{{ r.domain_name }}</td>
                 <td>{{ r.total_hours }}</td>
 
                 <!-- Week 1 -->
+                <td>{{ r.w1_alloc_hours }}</td>
+                <td>{{ r.w1_punched_hours }}</td>
                 <td>
-                  <div style="display:flex;align-items:center;">
-                    <input class="week-input" type="number" min="0" value="{{ r.w1_hours }}" readonly>
-                    <button class="icon-btn btn-accept" title="Accept week 1" data-week="1">✅</button>
-                    <button class="icon-btn btn-reject" title="Reject week 1" data-week="1">❌</button>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <input class="week-punch" type="number" min="0" step="0.25"
+                           data-week="1" value="{{ r.w1_punched_hours }}"
+                           data-alloc="{{ r.w1_alloc_hours }}" data-punched="{{ r.w1_punched_hours }}">
+                    <span class="remaining" data-remaining></span>
                   </div>
-                  {% if r.w1_status == 'ACCEPTED' %}
-                    <div class="status-accepted small-muted">Accepted</div>
-                  {% elif r.w1_status == 'REJECTED' %}
-                    <div class="status-rejected small-muted">Rejected</div>
-                  {% endif %}
                 </td>
 
                 <!-- Week 2 -->
+                <td>{{ r.w2_alloc_hours }}</td>
+                <td>{{ r.w2_punched_hours }}</td>
                 <td>
-                  <div style="display:flex;align-items:center;">
-                    <input class="week-input" type="number" min="0" value="{{ r.w2_hours }}" readonly>
-                    <button class="icon-btn btn-accept" title="Accept week 2" data-week="2">✅</button>
-                    <button class="icon-btn btn-reject" title="Reject week 2" data-week="2">❌</button>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <input class="week-punch" type="number" min="0" step="0.25"
+                           data-week="2" value="{{ r.w2_punched_hours }}"
+                           data-alloc="{{ r.w2_alloc_hours }}" data-punched="{{ r.w2_punched_hours }}">
+                    <span class="remaining" data-remaining></span>
                   </div>
-                  {% if r.w2_status == 'ACCEPTED' %}
-                    <div class="status-accepted small-muted">Accepted</div>
-                  {% elif r.w2_status == 'REJECTED' %}
-                    <div class="status-rejected small-muted">Rejected</div>
-                  {% endif %}
                 </td>
 
                 <!-- Week 3 -->
+                <td>{{ r.w3_alloc_hours }}</td>
+                <td>{{ r.w3_punched_hours }}</td>
                 <td>
-                  <div style="display:flex;align-items:center;">
-                    <input class="week-input" type="number" min="0" value="{{ r.w3_hours }}" readonly>
-                    <button class="icon-btn btn-accept" title="Accept week 3" data-week="3">✅</button>
-                    <button class="icon-btn btn-reject" title="Reject week 3" data-week="3">❌</button>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <input class="week-punch" type="number" min="0" step="0.25"
+                           data-week="3" value="{{ r.w3_punched_hours }}"
+                           data-alloc="{{ r.w3_alloc_hours }}" data-punched="{{ r.w3_punched_hours }}">
+                    <span class="remaining" data-remaining></span>
                   </div>
-                  {% if r.w3_status == 'ACCEPTED' %}
-                    <div class="status-accepted small-muted">Accepted</div>
-                  {% elif r.w3_status == 'REJECTED' %}
-                    <div class="status-rejected small-muted">Rejected</div>
-                  {% endif %}
                 </td>
 
                 <!-- Week 4 -->
+                <td>{{ r.w4_alloc_hours }}</td>
+                <td>{{ r.w4_punched_hours }}</td>
                 <td>
-                  <div style="display:flex;align-items:center;">
-                    <input class="week-input" type="number" min="0" value="{{ r.w4_hours }}" readonly>
-                    <button class="icon-btn btn-accept" title="Accept week 4" data-week="4">✅</button>
-                    <button class="icon-btn btn-reject" title="Reject week 4" data-week="4">❌</button>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <input class="week-punch" type="number" min="0" step="0.25"
+                           data-week="4" value="{{ r.w4_punched_hours }}"
+                           data-alloc="{{ r.w4_alloc_hours }}" data-punched="{{ r.w4_punched_hours }}">
+                    <span class="remaining" data-remaining></span>
                   </div>
-                  {% if r.w4_status == 'ACCEPTED' %}
-                    <div class="status-accepted small-muted">Accepted</div>
-                  {% elif r.w4_status == 'REJECTED' %}
-                    <div class="status-rejected small-muted">Rejected</div>
-                  {% endif %}
                 </td>
 
-                <td class="right">
-                  <div style="display:flex;gap:8px;justify-content:flex-end;">
-                    <button class="btn btn-save" data-action="save">Save</button>
-                    <button class="btn btn-reset" data-action="reset">Reset</button>
-                  </div>
+                <td style="white-space:nowrap;">
+                  <button class="btn btn-save-week">Save Week</button>
                 </td>
               </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% endfor %}
-    {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </div>
+
+    <!-- DAILY VIEW -->
+    <div id="daily-view" role="tabpanel" aria-labelledby="btn-daily" style="display:none; margin-top:12px;">
+      {% if not rows %}
+        <div style="padding:18px;border-radius:8px;background:#fff;">No allocations found for you this month.</div>
+      {% else %}
+        <p class="small-muted">Daily punching: edit hours for each date. Weekly totals are validated on save.</p>
+
+        {% for r in rows %}
+          <div style="margin-top:18px;padding:12px;border-radius:10px;background:#fbfdff;border:1px solid #eef2f7;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div><strong>{{ r.project_name }}</strong> — <span class="small-muted">{{ r.domain_name }}</span></div>
+              <div class="small-muted">Total Alloc: {{ r.total_hours }}</div>
+            </div>
+
+            <table class="daily-grid" style="margin-top:8px;">
+              <thead>
+                <tr>
+                  <th style="width:130px">Date</th>
+                  <th>Week Alloc</th>
+                  <th>Punched</th>
+                  <th>Enter Punch</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for d in daily_dates %}
+                  {% with ds=d.date|date:"Y-m-d" %}
+                  <tr data-allocation="{{ r.allocation_id }}" data-date="{{ ds }}" data-weeknum="{{ d.week_number }}">
+                    <td>{{ d.date|date:"D, d M" }}</td>
+
+                    <td>
+                      {% if d.week_number == 1 %}{{ r.w1_alloc_hours }}
+                      {% elif d.week_number == 2 %}{{ r.w2_alloc_hours }}
+                      {% elif d.week_number == 3 %}{{ r.w3_alloc_hours }}
+                      {% else %}{{ r.w4_alloc_hours }}
+                      {% endif %}
+                    </td>
+
+                    <td class="existing-punch">{{ daily_map|dict_get:r.allocation_id|dict_get:ds }}</td>
+
+                    <td>
+                      <div style="display:flex;align-items:center;gap:6px;">
+                        <input class="week-punch daily-input" type="number" min="0" step="0.25"
+                               value="{{ daily_map|dict_get:r.allocation_id|dict_get:ds }}"
+                               data-date="{{ ds }}" data-weeknum="{{ d.week_number }}">
+                        <span class="remaining" data-remaining></span>
+                      </div>
+                    </td>
+                  </tr>
+                  {% endwith %}
+                {% endfor %}
+              </tbody>
+            </table>
+
+            <div style="margin-top:8px;text-align:right;">
+              <button class="btn btn-save-daily">Save Daily Punches</button>
+            </div>
+          </div>
+        {% endfor %}
+      {% endif %}
+    </div>
+
   </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-function getCookie(name) { const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return v?v.pop():''; }
+function getCookie(name){ const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return v?v.pop():''; }
+const CSRFTOKEN = getCookie('csrftoken');
 
-// Helper: prepare updates for a row (reads local UI toggles)
-function buildRowUpdates(tr) {
-  // status_toggles will be stored in data-week-status attr on the tr (set when user clicks icons)
-  const updates = {};
-  // For weeks 1..4
-  for (let w = 1; w <= 4; w++) {
-    const weekKey = String(w);
-    const statusAttr = tr.dataset['week' + w + 'Status'] || ''; // e.g. 'ACCEPTED' or 'REJECTED' or ''
-    if (statusAttr) {
-      updates[weekKey] = statusAttr;
-    }
-  }
-  return updates;
+function setRemainingSpan(span, rem, alloc){
+  span.textContent = 'Rem: ' + rem.toFixed(2);
+  span.classList.remove('safe','warn','over');
+  if (rem < 0) span.classList.add('over');
+  else if (rem < alloc*0.2) span.classList.add('warn');
+  else span.classList.add('safe');
 }
 
-// Wire accept/reject icons for entire page
-document.addEventListener('click', function(e){
-  // Accept button clicked
-  if (e.target && e.target.matches('.btn-accept')) {
-    const tr = e.target.closest('tr');
-    const week = e.target.dataset.week;
-    // toggle accepted: if already accepted -> unset; else set ACCEPTED
-    const current = tr.dataset['week' + week + 'Status'] || '';
-    if (current === 'ACCEPTED') {
-      delete tr.dataset['week' + week + 'Status'];
-      // update small status display
-      const statusEl = e.target.closest('td').querySelector('.status-accepted');
-      if (statusEl) statusEl.remove();
-    } else {
-      tr.dataset['week' + week + 'Status'] = 'ACCEPTED';
-      // remove any rejected display
-      const td = e.target.closest('td');
-      const rej = td.querySelector('.status-rejected');
-      if (rej) rej.remove();
-      // add accepted display if not present
-      if (!td.querySelector('.status-accepted')) {
-        const el = document.createElement('div');
-        el.className = 'status-accepted small-muted';
-        el.innerText = 'Accepted';
-        td.appendChild(el);
-      }
-    }
-  }
+function updateWeeklyRemainingForInput(inp){
+  const alloc = parseFloat(inp.dataset.alloc || '0') || 0;
+  const val = parseFloat(inp.value || '0') || 0;
+  const rem = alloc - val;
+  const span = inp.parentElement.querySelector('[data-remaining]');
+  if (span) setRemainingSpan(span, rem, alloc);
+}
 
-  // Reject button clicked
-  if (e.target && e.target.matches('.btn-reject')) {
-    const tr = e.target.closest('tr');
-    const week = e.target.dataset.week;
-    const current = tr.dataset['week' + week + 'Status'] || '';
-    if (current === 'REJECTED') {
-      delete tr.dataset['week' + week + 'Status'];
-      const statusEl = e.target.closest('td').querySelector('.status-rejected');
-      if (statusEl) statusEl.remove();
-    } else {
-      tr.dataset['week' + week + 'Status'] = 'REJECTED';
-      // remove any accepted display
-      const td = e.target.closest('td');
-      const acc = td.querySelector('.status-accepted');
-      if (acc) acc.remove();
-      if (!td.querySelector('.status-rejected')) {
-        const el = document.createElement('div');
-        el.className = 'status-rejected small-muted';
-        el.innerText = 'Rejected';
-        td.appendChild(el);
-      }
-    }
-  }
+function initWeeklyRemaining(){
+  document.querySelectorAll('#weekly-view input.week-punch').forEach(inp=>{
+    updateWeeklyRemainingForInput(inp);
+    inp.addEventListener('input', () => updateWeeklyRemainingForInput(inp));
+  });
+}
 
-  // Save button clicked (row-level)
-  if (e.target && e.target.matches('.btn-save')) {
-    const tr = e.target.closest('tr');
-    const allocationId = tr.dataset.allocation;
-    const updates = buildRowUpdates(tr);
-    if (Object.keys(updates).length === 0){
-      alert('Nothing to save for this row.');
-      return;
-    }
-    // confirm
-    if (!confirm('Save your accept/reject choices for this row?')) return;
-
-    fetch("{% url 'projects:my_allocations_update_status' %}", {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken')
-      },
-      body: JSON.stringify({ allocation_id: Number(allocationId), updates: updates })
-    }).then(r => r.json()).then(resp => {
-      if (resp && resp.ok) {
-        alert('Saved');
-        // reload to reflect server-authoritative state (and ensure Managers see rejects)
-        location.reload();
-      } else {
-        alert('Save failed: ' + (resp && resp.error ? resp.error : JSON.stringify(resp)));
-      }
-    }).catch(err=>{
-      console.error(err);
-      alert('Save failed: ' + err);
+function updateDailyRemaining(){
+  const groups = {};
+  document.querySelectorAll('#daily-view tr[data-weeknum]').forEach(tr=>{
+    const allocId = tr.dataset.allocation;
+    const wk = tr.dataset.weeknum;
+    const key = allocId + '|' + wk;
+    const allocCell = tr.querySelector('td:nth-child(2)');
+    const alloc = parseFloat((allocCell && allocCell.textContent) || '0') || 0;
+    const inp = tr.querySelector('input.daily-input');
+    const val = parseFloat((inp && inp.value) || '0') || 0;
+    if (!groups[key]) groups[key] = {alloc: alloc, sum: 0, inputs: []};
+    groups[key].sum += val;
+    if (inp) groups[key].inputs.push(inp);
+  });
+  Object.values(groups).forEach(g=>{
+    const rem = g.alloc - g.sum;
+    g.inputs.forEach(inp=>{
+      const span = inp.parentElement.querySelector('[data-remaining]');
+      if (span) setRemainingSpan(span, rem, g.alloc);
     });
-  }
+  });
+}
 
-  // Reset button clicked -> reload current page to restore server state
-  if (e.target && e.target.matches('.btn-reset')) {
-    if (!confirm('Reset to server values?')) return;
-    location.reload();
+function initDailyRemaining(){
+  document.querySelectorAll('#daily-view input.daily-input').forEach(inp=>{
+    inp.addEventListener('input', updateDailyRemaining);
+  });
+  updateDailyRemaining();
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  initWeeklyRemaining();
+  initDailyRemaining();
+});
+
+document.getElementById('btn-weekly').addEventListener('click', function(){
+  document.getElementById('weekly-view').style.display = '';
+  document.getElementById('daily-view').style.display = 'none';
+  this.classList.add('active'); document.getElementById('btn-daily').classList.remove('active');
+});
+document.getElementById('btn-daily').addEventListener('click', function(){
+  document.getElementById('weekly-view').style.display = 'none';
+  document.getElementById('daily-view').style.display = '';
+  this.classList.add('active'); document.getElementById('btn-weekly').classList.remove('active');
+});
+
+// Save weekly punches
+document.addEventListener('click', function(ev){
+  if(!ev.target.matches('.btn-save-week')) return;
+  const tr = ev.target.closest('tr[data-allocation]');
+  const allocationId = Number(tr.dataset.allocation);
+  const inputs = Array.from(tr.querySelectorAll('input.week-punch'));
+  const payloads = inputs.map(inp => ({week_number: Number(inp.dataset.week), actual_hours: parseFloat(inp.value||'0')}));
+  if(!confirm('Save weekly punches for this allocation?')) return;
+  let i=0;
+  function sendNext(){
+    if(i>=payloads.length){ alert('Saved weekly punches'); location.reload(); return; }
+    fetch("{% url 'projects:save_my_alloc_weekly' %}", {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRFToken':CSRFTOKEN},
+      body:JSON.stringify({allocation_id:allocationId, week_number:payloads[i].week_number, actual_hours:payloads[i].actual_hours})
+    }).then(r=>r.json()).then(j=>{ if(j&&j.ok){i++;sendNext();} else{alert('Error: '+(j.error||JSON.stringify(j)));} })
+    .catch(err=>alert('Save failed: '+err));
   }
+  sendNext();
+});
+
+// Save daily punches
+document.addEventListener('click', function(ev){
+  if(!ev.target.matches('.btn-save-daily')) return;
+  const panel = ev.target.closest('div[style*="margin-top:18px"]');
+  const rows = Array.from(panel.querySelectorAll('tr[data-date]'));
+  const allocationId = Number(panel.querySelector('tr[data-allocation]').dataset.allocation);
+  const tasks=[];
+  rows.forEach(tr=>{
+    const inp=tr.querySelector('input.daily-input');
+    const date=tr.dataset.date;
+    const val=parseFloat(inp.value||'0');
+    const existing=parseFloat(tr.querySelector('.existing-punch').innerText||'0');
+    if(val!==existing){tasks.push({punch_date:date, actual_hours:val});}
+  });
+  if(tasks.length===0){alert('No changes');return;}
+  if(!confirm('Save daily punches for this project?'))return;
+  let i=0;
+  function sendOne(){
+    if(i>=tasks.length){alert('Saved daily punches');location.reload();return;}
+    const t=tasks[i];
+    fetch("{% url 'projects:save_my_alloc_daily' %}", {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRFToken':CSRFTOKEN},
+      body:JSON.stringify({allocation_id:allocationId,punch_date:t.punch_date,actual_hours:t.actual_hours})
+    }).then(r=>r.json()).then(j=>{ if(j&&j.ok){i++;sendOne();} else{alert('Error: '+(j.error||JSON.stringify(j)));} })
+    .catch(err=>alert('Save failed: '+err));
+  }
+  sendOne();
 });
 </script>
 {% endblock %}

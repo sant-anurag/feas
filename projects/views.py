@@ -38,6 +38,13 @@ from django.views.decorators.http import require_POST
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.db import connection, transaction
 
+import json
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime, date, timedelta
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse, HttpResponseBadRequest
+from django.db import connection, transaction
+
 PAGE_SIZE = 10
 # -------------------------
 # LDAP helpers (use your ldap_utils)
@@ -80,7 +87,24 @@ def get_connection():
         charset="utf8mb4",
         use_unicode=True,
     )
+def get_month_start_and_end(year_month):
+    # year_month is "YYYY-MM" or a date; returns (date_start, date_end)
+    if isinstance(year_month, str) and "-" in year_month:
+        dt = datetime.strptime(year_month + "-01", "%Y-%m-%d").date()
+    elif isinstance(year_month, date):
+        dt = year_month.replace(day=1)
+    else:
+        dt = date.today().replace(day=1)
+    # compute end of month
+    next_month = (dt.replace(day=28) + timedelta(days=4)).replace(day=1)
+    last_day = next_month - timedelta(days=1)
+    return (dt, last_day)
 
+def month_day_to_week_number(dt):
+    "Map day-of-month to week 1..4 (days 1-7 =>1, 8-14=>2, 15-21=>3, 22-31=>4)"
+    d = dt.day
+    wk = (d - 1) // 7 + 1
+    return min(4, wk)
 
 def _ensure_user_from_ldap(request, samaccountname):
     """
@@ -1506,114 +1530,275 @@ def save_team_allocation(request):
 
     return JsonResponse({"ok": True, "allocation_id": allocation_id, "weeks": result_weeks})
 
-# -------------------------
-# my_allocations
-# -------------------------
 def my_allocations(request):
     """
-    My Allocations view for logged-in user. Uses session ldap string as canonical filter.
-    Shows weekly allocation hours and status fields.
+    Shows weekly & daily views for the logged-in user's allocations for selected month.
+    data produced:
+      - rows: list of allocation rows with fields:
+        allocation_id, project_name, domain_name, total_hours,
+        w1_alloc_hours, w1_punched_hours, w1_status (optional), ... w4_*
+      - daily_dates: list of date objects for the month (for daily view)
+      - daily_map: { allocation_id: { 'YYYY-MM-DD': punched_hours, ... }, ... }
     """
-    session_ldap = request.session.get("ldap_username")
-    print("my_allocations - session_ldap:", session_ldap)
+    session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or request.user.email
     if not session_ldap:
-        return redirect("accounts:login")
-    from datetime import date
-    month_str = request.GET.get("month")
-    if month_str:
-        try:
-            month_start = datetime.strptime(month_str + "-01", "%Y-%m-%d").date()
-        except Exception:
-            month_start = date.today().replace(day=1)
-    else:
-        month_start = date.today().replace(day=1)
+        return HttpResponseBadRequest("No LDAP user in session")
 
-    rows = []
-    allocation_ids = []
-    try:
-        with connection.cursor() as cur:
-            cur.execute("""
-                SELECT ai.id AS item_id,
-                       ai.allocation_id,
-                       ai.project_id,
-                       p.name AS project_name,
-                       ai.coe_id,
-                       coe.name AS coe_name,
-                       ai.domain_id,
-                       d.name AS domain_name,
-                       COALESCE(ai.total_hours,0) AS total_hours,
-                       COALESCE(ai.user_ldap, '') AS user_ldap,
-                       u.username AS username,
-                       u.email AS email
-                FROM allocation_items ai
-                JOIN allocations a ON ai.allocation_id = a.id
-                LEFT JOIN users u ON ai.user_id = u.id
-                LEFT JOIN projects p ON ai.project_id = p.id
-                LEFT JOIN domains d ON ai.domain_id = d.id
-                LEFT JOIN coes coe ON ai.coe_id = coe.id
-                WHERE a.month_start = %s
-                  AND ai.user_ldap = %s
-                ORDER BY p.name, coe.name
-            """, [month_start, session_ldap])
-            rows = dictfetchall(cur)
-            allocation_ids = list({r["allocation_id"] for r in rows if r.get("allocation_id")})
-    except Exception as exc:
-        logger.exception("my_allocations fetch failed: %s", exc)
-        rows = []
-        allocation_ids = []
+    # month param from querystring (YYYY-MM), default to current month
+    month_param = request.GET.get("month", date.today().strftime("%Y-%m"))
+    month_start, month_end = get_month_start_and_end(month_param)
 
-    # weekly map
-    weekly_map = {}
+    # Step 1: fetch allocations (monthly_allocation_entries) for this user & month
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT mae.id AS allocation_id,
+                   mae.project_id,
+                   p.name AS project_name,
+                   mae.iom_id,
+                   pw.department AS domain_name,
+                   COALESCE(mae.total_hours, 0.00) AS total_hours
+            FROM monthly_allocation_entries mae
+            LEFT JOIN projects p ON mae.project_id = p.id
+            LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
+            WHERE mae.user_ldap = %s
+              AND mae.month_start = %s
+            ORDER BY p.name
+        """, [session_ldap, month_start])
+        alloc_rows = dictfetchall(cur)
+
+    allocation_ids = [r['allocation_id'] for r in alloc_rows] if alloc_rows else []
+
+    # Step 2: fetch weekly_allocations for these allocation_ids (gives allocated week hours)
+    weekly_alloc = {}  # { allocation_id: {week_number: {percent, hours}}}
     if allocation_ids:
-        try:
-            with connection.cursor() as cur:
-                cur.execute("""
-                    SELECT allocation_id, week_number, hours, status
-                    FROM weekly_allocations
-                    WHERE allocation_id IN %s
-                """, [tuple(allocation_ids)])
-                for w in dictfetchall(cur):
-                    alloc = w["allocation_id"]
-                    wknum = int(w["week_number"] or 0)
-                    weekly_map.setdefault(alloc, {})[wknum] = {"hours": int(w["hours"] or 0), "status": w.get("status") or ""}
-        except Exception as exc:
-            logger.exception("my_allocations weekly fetch failed: %s", exc)
-            weekly_map = {}
+        in_clause = ",".join(["%s"] * len(allocation_ids))
+        params = allocation_ids
+        with connection.cursor() as cur:
+            cur.execute(f"""
+                SELECT allocation_id, week_number, percent, hours
+                FROM weekly_allocations
+                WHERE allocation_id IN ({in_clause})
+            """, params)
+            for r in dictfetchall(cur):
+                aid = r['allocation_id']
+                weekly_alloc.setdefault(aid, {})[int(r['week_number'])] = {
+                    'percent': float(r['percent'] or 0.0),
+                    'hours': Decimal(str(r['hours'] or '0.00'))
+                }
 
-        # attach
-        for r in rows:
-            a_id = r.get("allocation_id")
-            wk = weekly_map.get(a_id, {})
-            r["w1"] = wk.get(1, {}).get("hours", 0)
-            r["w2"] = wk.get(2, {}).get("hours", 0)
-            r["w3"] = wk.get(3, {}).get("hours", 0)
-            r["w4"] = wk.get(4, {}).get("hours", 0)
-            r["s1"] = wk.get(1, {}).get("status", "")
-            r["s2"] = wk.get(2, {}).get("status", "")
-            r["s3"] = wk.get(3, {}).get("status", "")
-            r["s4"] = wk.get(4, {}).get("status", "")
+    # Step 3: fetch user punches (both weekly and daily) for these allocation_ids within month
+    punches = []  # raw rows
+    user_punch_map_week = {}  # { allocation_id: {week_number: Decimal(total_hours)} }
+    user_punch_map_daily = {}  # { allocation_id: { 'YYYY-MM-DD': Decimal(hours) } }
+    if allocation_ids:
+        in_clause = ",".join(["%s"] * len(allocation_ids))
+        params = [session_ldap] + allocation_ids + [month_start, month_end]
+        with connection.cursor() as cur:
+            cur.execute(f"""
+                SELECT allocation_id, week_number, punch_date, actual_hours
+                FROM user_punches
+                WHERE user_ldap = %s
+                  AND allocation_id IN ({in_clause})
+                  AND (punch_date BETWEEN %s AND %s OR week_number IS NOT NULL)
+            """, params)
+            for r in dictfetchall(cur):
+                aid = r['allocation_id']
+                if r['week_number'] is not None:
+                    wk = int(r['week_number'])
+                    user_punch_map_week.setdefault(aid, {})
+                    user_punch_map_week[aid][wk] = user_punch_map_week[aid].get(wk, Decimal('0.00')) + Decimal(str(r['actual_hours'] or '0.00'))
+                if r['punch_date']:
+                    dstr = r['punch_date'].strftime("%Y-%m-%d")
+                    user_punch_map_daily.setdefault(aid, {})
+                    user_punch_map_daily[aid][dstr] = Decimal(str(r['actual_hours'] or '0.00'))
 
-    # enrich display name
-    for r in rows:
-        display = (r.get("username") or r.get("user_ldap") or "")
-        if r.get("email"):
-            display += f" <{r['email']}>"
-        r["display_name"] = display
+    # Step 4: build final rows that template consumes
+    rows = []
+    for r in alloc_rows:
+        aid = r['allocation_id']
+        total_hours = Decimal(str(r['total_hours'] or '0.00'))
+        row = {
+            'allocation_id': aid,
+            'project_name': r['project_name'],
+            'domain_name': r['domain_name'],
+            'total_hours': format(total_hours, '0.2f')
+        }
+        # for each week 1..4 attach allocated and punched
+        for wk in range(1, 5):
+            alloc_w = weekly_alloc.get(aid, {}).get(wk, {}).get('hours', Decimal('0.00'))
+            punched_w = user_punch_map_week.get(aid, {}).get(wk, Decimal('0.00'))
+            row[f'w{wk}_alloc_hours'] = format(alloc_w, '0.2f')
+            row[f'w{wk}_punched_hours'] = format(punched_w, '0.2f')
+        rows.append(row)
 
-    # group by project for template convenience
-    grouped = {}
-    for r in rows:
-        proj = r.get("project_name") or "Other"
-        grouped.setdefault(proj, []).append(r)
+    # Step 5: prepare daily grid (list of dates)
+    dates = []
+    cur_day = month_start
+    while cur_day <= month_end:
+        dates.append(cur_day)
+        cur_day += timedelta(days=1)
+    # daily_map to be used by template: { allocation_id: { 'YYYY-MM-DD': '0.00', ... } }
+    daily_map = {}
+    for r in alloc_rows:
+        aid = r['allocation_id']
+        daymap = {}
+        for d in dates:
+            s = d.strftime("%Y-%m-%d")
+            daymap[s] = format(user_punch_map_daily.get(aid, {}).get(s, Decimal('0.00')), '0.2f')
+        daily_map[aid] = daymap
 
     return render(request, "projects/my_allocations.html", {
-        "rows": rows,
-        "grouped_rows": grouped,
-        "weekly_map": weekly_map,
-        "month_start": month_start,
-        "ldap_username": session_ldap,
+        'rows': rows,
+        'daily_dates': dates,
+        'daily_map': daily_map,
+        'month_start': month_start,
     })
-# -------------------------
+
+
+# ---------- save weekly punches endpoint ----------
+@require_POST
+def save_my_alloc_weekly(request):
+    """
+    POST JSON: { allocation_id: int, week_number: int, actual_hours: number }
+    Validates actual_hours <= weekly_allocated_hours
+    Upserts into user_punches (user_ldap, allocation_id, week_number)
+    """
+    session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or request.user.email
+    if not session_ldap:
+        return JsonResponse({'ok': False, 'error': 'Not authenticated'}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+        allocation_id = int(payload.get('allocation_id', 0))
+        week_number = int(payload.get('week_number', 0))
+        actual_hours = Decimal(str(payload.get('actual_hours', '0'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except Exception:
+        return JsonResponse({'ok': False, 'error': 'Invalid payload'}, status=400)
+
+    if allocation_id <= 0 or week_number not in (1,2,3,4):
+        return JsonResponse({'ok': False, 'error': 'Invalid allocation or week'}, status=400)
+
+    # fetch allocated hours for this allocation/week
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT hours
+            FROM weekly_allocations
+            WHERE allocation_id = %s AND week_number = %s
+            LIMIT 1
+        """, [allocation_id, week_number])
+        rec = cur.fetchone()
+
+    if not rec:
+        return JsonResponse({'ok': False, 'error': 'No weekly allocation found for this week'}, status=400)
+
+    alloc_hours = Decimal(str(rec[0] or '0.00'))
+
+    # Validate: user cannot punch more than allocated hours for that week
+    if actual_hours < Decimal('0.00') or actual_hours > alloc_hours:
+        return JsonResponse({'ok': False, 'error': f'actual_hours must be between 0 and {format(alloc_hours, "0.2f")}'}, status=400)
+
+    # Upsert into user_punches keyed by (user_ldap, allocation_id, week_number)
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO user_punches (user_ldap, allocation_id, week_number, actual_hours, updated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE actual_hours = VALUES(actual_hours), updated_at = CURRENT_TIMESTAMP
+                """, [session_ldap, allocation_id, week_number, str(actual_hours)])
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+
+    return JsonResponse({'ok': True, 'allocation_id': allocation_id, 'week_number': week_number, 'actual_hours': format(actual_hours, '0.2f')})
+
+
+# ---------- save daily punches endpoint ----------
+@require_POST
+def save_my_alloc_daily(request):
+    """
+    POST JSON: { allocation_id: int, punch_date: "YYYY-MM-DD", actual_hours: number }
+    Validates that total daily punches for the week (existing + new) do not exceed the week's allocated hours.
+    Upserts into user_punches by (user_ldap, allocation_id, punch_date).
+    """
+    session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or request.user.email
+    if not session_ldap:
+        return JsonResponse({'ok': False, 'error': 'Not authenticated'}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+        allocation_id = int(payload.get('allocation_id', 0))
+        punch_date_str = payload.get('punch_date')
+        actual_hours = Decimal(str(payload.get('actual_hours', '0'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        punch_date = datetime.strptime(punch_date_str, "%Y-%m-%d").date()
+    except Exception:
+        return JsonResponse({'ok': False, 'error': 'Invalid payload'}, status=400)
+
+    if allocation_id <= 0:
+        return JsonResponse({'ok': False, 'error': 'Invalid allocation id'}, status=400)
+
+    # map date to week_number (1..4)
+    week_number = month_day_to_week_number(punch_date)
+
+    # fetch weekly allocated hours
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT hours
+            FROM weekly_allocations
+            WHERE allocation_id = %s AND week_number = %s
+            LIMIT 1
+        """, [allocation_id, week_number])
+        rec = cur.fetchone()
+    if not rec:
+        return JsonResponse({'ok': False, 'error': 'No weekly allocation found for this week'}, status=400)
+    alloc_hours = Decimal(str(rec[0] or '0.00'))
+
+    # compute sum of existing daily punches for that week for this user+allocation (excluding current date row if exists)
+    # Determine week date range (week start / end) inside the month:
+    # Simple approach: find monday-sunday range containing punch_date OR use month-week buckets; we'll rely on days mapping used above:
+    # We'll compute week start as day 1+(week_number-1)*7 and end = min(month_end, week_start+6)
+    month_start, month_end = get_month_start_and_end(punch_date.strftime("%Y-%m"))
+    wk_start_day = (week_number - 1) * 7 + 1
+    wk_start = month_start.replace(day=wk_start_day)
+    wk_end = wk_start + timedelta(days=6)
+    if wk_end > month_end:
+        wk_end = month_end
+
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT COALESCE(SUM(actual_hours),0) FROM user_punches
+            WHERE user_ldap = %s AND allocation_id = %s AND punch_date BETWEEN %s AND %s
+        """, [session_ldap, allocation_id, wk_start, wk_end])
+        sum_existing = Decimal(str(cur.fetchone()[0] or '0.00'))
+
+        # also subtract existing value for the same date (if any), because that will be replaced by the new value
+        cur.execute("""
+            SELECT actual_hours FROM user_punches
+            WHERE user_ldap = %s AND allocation_id = %s AND punch_date = %s
+            LIMIT 1
+        """, [session_ldap, allocation_id, punch_date])
+        existing_same = cur.fetchone()
+        existing_same_val = Decimal(str(existing_same[0])) if existing_same and existing_same[0] is not None else Decimal('0.00')
+
+    # total_after = sum_existing - existing_same_val + actual_hours
+    total_after = (sum_existing - existing_same_val) + actual_hours
+
+    if total_after < Decimal('0.00') or total_after > alloc_hours:
+        return JsonResponse({'ok': False, 'error': f'Punch would exceed weekly allocation ({format(alloc_hours,"0.2f")}) — current week total after this would be {format(total_after,"0.2f")}'}, status=400)
+
+    # Upsert the daily punch
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO user_punches (user_ldap, allocation_id, punch_date, actual_hours, updated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE actual_hours = VALUES(actual_hours), updated_at = CURRENT_TIMESTAMP
+                """, [session_ldap, allocation_id, punch_date, str(actual_hours)])
+    except Exception as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=500)
+
+    return JsonResponse({'ok': True, 'allocation_id': allocation_id, 'punch_date': punch_date.strftime("%Y-%m-%d"), 'actual_hours': format(actual_hours, '0.2f')})
+
 # my_allocations_update_status
 # -------------------------
 @require_POST
