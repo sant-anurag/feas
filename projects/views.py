@@ -28,7 +28,10 @@ from django.views.decorators.http import require_GET, require_POST
 from django.http import JsonResponse
 from django.db import connection, transaction
 import json
-
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side
+from django.http import HttpResponse
+from openpyxl.utils import get_column_letter
 
 PAGE_SIZE = 10
 # -------------------------
@@ -1886,7 +1889,7 @@ def get_applicable_ioms(request):
 
     # Note: we filter for values > 0 (either fte or hours) so only meaningful IOMs appear
     sql = f"""
-        SELECT id, iom_id, department,
+        SELECT id, iom_id, department,site,'function',
                {fte_col} as month_fte, {hrs_col} as month_hours,
                buyer_wbs_cc, seller_wbs_cc
         FROM prism_wbs
@@ -1922,6 +1925,8 @@ def get_applicable_ioms(request):
             "id": rec.get("id"),
             "iom_id": rec.get("iom_id"),
             "department": rec.get("department"),
+            "site": rec.get("site"),
+            "function": rec.get("function"),
             "month_fte": float(rec.get("month_fte") or 0),
             "month_hours": float(rec.get("month_hours") or 0),
             "buyer_wbs_cc": rec.get("buyer_wbs_cc"),
@@ -2010,6 +2015,146 @@ def get_iom_details(request):
         }
     }
     return JsonResponse(resp)
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from django.http import HttpResponse
+
+def export_allocations(request):
+    project_id = request.GET.get("project_id")
+    iom_id = request.GET.get("iom_id")
+    month_start = request.GET.get("month_start")
+
+    # --- 1. Get IOM details
+    iom = None
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT iom_id, department, buyer_wbs_cc, seller_wbs_cc,
+                   site, 'function', total_hours
+            FROM prism_wbs
+            WHERE project_id=%s AND iom_id=%s
+            LIMIT 1
+        """, [project_id, iom_id])
+        row = cur.fetchone()
+        if row:
+            iom = {
+                "iom_id": row[0],
+                "department": row[1],
+                "buyer_wbs_cc": row[2],
+                "seller_wbs_cc": row[3],
+                "site": row[4],
+                "function": row[5],
+                "total_hours": row[6],
+            }
+
+    # --- 2. Get allocations
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT user_ldap, total_hours
+            FROM monthly_allocation_entries
+            WHERE project_id=%s AND iom_id=%s AND month_start=%s
+        """, [project_id, iom_id, month_start])
+        allocations = cur.fetchall()
+
+    # --- 3. Build Excel
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Allocations"
+
+    # Define styles
+    header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+    bold_font = Font(name="Calibri", bold=True, size=11)
+    normal_font = Font(name="Calibri", size=11)
+    center = Alignment(horizontal="center", vertical="center")
+    left = Alignment(horizontal="left", vertical="center")
+    right = Alignment(horizontal="right", vertical="center")
+    fill_blue = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # dark blue
+    fill_lightblue = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")  # light blue
+    fill_gray = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    border = Border(left=Side(style="thin"), right=Side(style="thin"),
+                    top=Side(style="thin"), bottom=Side(style="thin"))
+
+    row_idx = 1
+
+    # Title Row
+    ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=2)
+    title_cell = ws.cell(row=row_idx, column=1, value="IOM Allocation Report")
+    title_cell.font = Font(name="Calibri", bold=True, size=14, color="FFFFFF")
+    title_cell.alignment = center
+    ws.row_dimensions[row_idx].height = 24
+    title_cell.fill = fill_blue
+    row_idx += 2
+
+    # --- IOM Detail Section
+    if iom:
+        details = [
+            ("IOM ID", iom["iom_id"]),
+            ("Department", iom["department"]),
+            ("WBS", f'{iom["buyer_wbs_cc"] or "-"} / {iom["seller_wbs_cc"] or "-"}'),
+            ("Site", iom["site"]),
+            ("Function", iom["function"]),
+            ("Total Hours", iom["total_hours"]),
+        ]
+        for key, val in details:
+            ws.cell(row=row_idx, column=1, value=key).font = bold_font
+            ws.cell(row=row_idx, column=1).alignment = left
+            ws.cell(row=row_idx, column=1).fill = fill_gray
+            ws.cell(row=row_idx, column=1).border = border
+
+            ws.cell(row=row_idx, column=2, value=val).font = normal_font
+            ws.cell(row=row_idx, column=2).alignment = left
+            ws.cell(row=row_idx, column=2).border = border
+            row_idx += 1
+
+        row_idx += 1  # blank line
+
+    # --- Allocations Section Header
+    ws.cell(row=row_idx, column=1, value="Resource (LDAP)").font = header_font
+    ws.cell(row=row_idx, column=1).fill = fill_blue
+    ws.cell(row=row_idx, column=1).alignment = center
+    ws.cell(row=row_idx, column=1).border = border
+
+    ws.cell(row=row_idx, column=2, value="Total Hours").font = header_font
+    ws.cell(row=row_idx, column=2).fill = fill_blue
+    ws.cell(row=row_idx, column=2).alignment = center
+    ws.cell(row=row_idx, column=2).border = border
+    row_idx += 1
+
+    # --- Allocation Rows
+    for alloc in allocations:
+        ws.cell(row=row_idx, column=1, value=alloc[0]).font = normal_font
+        ws.cell(row=row_idx, column=1).alignment = left
+        ws.cell(row=row_idx, column=1).border = border
+
+        ws.cell(row=row_idx, column=2, value=alloc[1]).font = normal_font
+        ws.cell(row=row_idx, column=2).alignment = right
+        ws.cell(row=row_idx, column=2).border = border
+        row_idx += 1
+
+    # Auto-fit columns
+
+    for idx, col in enumerate(ws.columns, 1):
+        max_length = 0
+        col_letter = get_column_letter(idx)
+        for cell in col:
+            if cell.value:
+                try:
+                    max_length = max(max_length, len(str(cell.value)))
+                except Exception:
+                    pass
+        ws.column_dimensions[col_letter].width = max_length + 3
+
+    # --- Response
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    filename = f"allocations_{iom_id}_{month_start}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    wb.save(response)
+    return response
+
+
+
 
 
 

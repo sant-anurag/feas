@@ -46,6 +46,5 @@ urlpatterns = [
 
     path('get_allocations_for_iom/', views.get_allocations_for_iom, name='get_allocations_for_iom'),
     path('save_monthly_allocations/', views.save_monthly_allocations, name='save_monthly_allocations'),
-    # replace/override existing if present
-
+    path("export_allocations/", views.export_allocations, name="export_allocations"),
 ]
