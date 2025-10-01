@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="{% static 'projects/css/monthly_allocations.css' %}">
 
 <style>
-/* Clean, professional styling for the page */
+/* (kept style from your latest version; minor spacing preserved) */
 .alloc-card { background:#fff; padding:26px; border-radius:12px; box-shadow:0 8px 30px rgba(12,35,66,0.06); }
 .page-title { margin:0 0 6px 0; font-size:1.6rem; font-weight:700; color:#0f172a; }
 .page-sub { color:#6b7280; margin-bottom:18px; }
@@ -51,7 +51,6 @@
 .save-tooltip .tooltip-text { display:none; position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%); background:rgba(2,6,23,0.95); color:#fff; padding:10px 12px; border-radius:8px; font-size:0.9rem; max-width:420px; z-index:1400; box-shadow:0 8px 30px rgba(2,6,23,0.2); }
 .save-tooltip:hover .tooltip-text { display:block; }
 
-/* responsive */
 @media (max-width:900px) {
   .iom-card { flex-direction:column; align-items:flex-start; }
   .iom-right { text-align:left; width:100%; margin-top:8px; }
@@ -126,16 +125,16 @@
     </div>
   </div>
 
-  <!-- IOM Details (separate card) -->
+  <!-- IOM Details -->
   <div id="iomDetailWrap" style="display:none;">
     <div class="iom-card" role="region" aria-live="polite">
-     <div class="iom-left">
-      <div id="iomTitle" class="iom-title">IOM: —</div>
-      <div id="iomDept" class="iom-dept">Department: —</div>
-      <div id="iomWbs" class="iom-dept">WBS: —</div>
-      <div id="iomSite" class="iom-dept">Site: —</div>
-      <div id="iomFunction" class="iom-dept">Function: —</div>
-    </div>
+      <div class="iom-left">
+        <div id="iomTitle" class="iom-title">IOM: —</div>
+        <div id="iomDept" class="iom-dept">Department: —</div>
+        <div id="iomWbs" class="iom-dept">WBS: —</div>
+        <div id="iomSite" class="iom-dept">Site: —</div>
+        <div id="iomFunction" class="iom-dept">Function: —</div>
+      </div>
 
       <div class="iom-right">
         <div class="stat">Month FTE: <strong id="iomMonthFte">0.0000</strong></div>
@@ -146,7 +145,7 @@
     </div>
   </div>
 
-  <!-- Resource Allocations - separate section -->
+  <!-- Resource Allocations -->
   <div id="allocSectionWrap" style="display:none;">
     <div style="display:flex; align-items:center; justify-content:space-between;">
       <h3 class="section-title">Resource Allocations</h3>
@@ -185,21 +184,12 @@
 </div>
 
 <script>
-/*
-Complete client-side logic:
-- loadIoms : GET projects:get_applicable_ioms
-- addIomBtn => show IOM details (iom.iom_id used) and load saved allocations via GET projects:get_allocations_for_iom
-- allocations shown in a separate section/table
-- Add Resource -> new left-aligned row with LDAP input and hours
-- LDAP autocomplete uses projects:allocations_ldap_search
-- validateAll updates remaining badge, disables/enables Save and updates tooltip
-- Save posts to projects:save_monthly_allocations and re-renders saved items (server should return saved grouped by iom_id)
-- Export triggers GET projects:export_allocations with query params to download
-*/
-
 (function() {
-  const MAX_HOURS_PER_RESOURCE = 183.75;
-  const CSRFTOKEN = document.querySelector('[name="csrfmiddlewaretoken"]').value;
+  // default (fallback) limit if server not giving month_limit
+  const DEFAULT_MONTHLY_LIMIT = parseFloat("{{ hours_available|default:183.75 }}") || 183.75;
+
+  const CSRFTOKEN_ELEM = document.querySelector('[name="csrfmiddlewaretoken"]');
+  const CSRFTOKEN = CSRFTOKEN_ELEM ? CSRFTOKEN_ELEM.value : '';
 
   // DOM refs
   const projectSelect = document.getElementById('projectSelect');
@@ -217,6 +207,9 @@ Complete client-side logic:
   const iomMonthHrs = document.getElementById('iomMonthHrs');
   const iomRemFte = document.getElementById('iomRemFte');
   const iomRemHrs = document.getElementById('iomRemHrs');
+  const iomWbs = document.getElementById('iomWbs');
+  const iomSite = document.getElementById('iomSite');
+  const iomFunction = document.getElementById('iomFunction');
 
   const allocSectionWrap = document.getElementById('allocSectionWrap');
   const allocBadge = document.getElementById('allocBadge');
@@ -226,7 +219,7 @@ Complete client-side logic:
   const saveTooltip = document.getElementById('saveTooltip');
   const exportBtn = document.getElementById('exportBtn');
 
-  // endpoints (please ensure URL names exist)
+  // URLs
   const LDAP_ENDPOINT = '{% url "projects:allocations_ldap_search" %}';
   const GET_IOMS_URL = '{% url "projects:get_applicable_ioms" %}';
   const GET_IOM_DETAILS_URL = '{% url "projects:get_iom_details" %}';
@@ -234,10 +227,12 @@ Complete client-side logic:
   const SAVE_ALLOC_URL = '{% url "projects:save_monthly_allocations" %}';
   const EXPORT_URL = '{% url "projects:export_allocations" %}';
 
-  // utility
+  // current month limit (per resource limit from DB)
+  let CURRENT_MONTH_LIMIT = DEFAULT_MONTHLY_LIMIT;
+
   function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-  // ---- Load IOMs ----
+  // Load IOMs from server (includes month_limit now)
   async function loadIoms() {
     const project_id = projectSelect.value;
     const year = yearInput.value || (new Date()).getFullYear();
@@ -262,6 +257,7 @@ Complete client-side logic:
         const opt = document.createElement('option');
         opt.value = JSON.stringify(iom);  // store row
         opt.text = `${iom.iom_id} · Dept:${iom.department || '-'} · Hrs:${(parseFloat(iom.month_hours||0)).toFixed(2)}`;
+        // embed month_limit as data attribute (still keep JSON)
         iomsDropdown.appendChild(opt);
       });
     } catch (err) {
@@ -272,58 +268,89 @@ Complete client-side logic:
 
   loadIomsBtn.addEventListener('click', loadIoms);
 
-  // show IOM preview when selected
-  iomsDropdown.addEventListener('change', function() {
+  // when user selects an IOM from dropdown, fetch authoritative IOM details from server
+  iomsDropdown.addEventListener('change', async function() {
     if (!this.value) {
       iomDetailWrap.style.display = 'none';
       return;
     }
     const obj = JSON.parse(this.value);
-    showIomPreview(obj);
+    // call server to get authoritative details (month_fte, month_hours, remaining, month_limit)
+    await fetchIomDetails(obj.iom_id);
   });
 
-    function showIomPreview(iom) {
-          iomTitle.textContent = 'IOM: ' + (iom.iom_id || '');
-          iomDept.textContent = 'Department: ' + (iom.department || '—');
+  // show IOM preview (object must contain fields from server)
+  function showIomPreview(iom) {
+    iomTitle.textContent = 'IOM: ' + (iom.iom_id || '');
+    iomDept.textContent = 'Department: ' + (iom.department || '—');
 
-          // display buyer & seller WBS in one line
-          const buyer = iom.buyer_wbs_cc || '-';
-          const seller = iom.seller_wbs_cc || '-';
-          document.getElementById('iomWbs').textContent = 'WBS: ' + buyer + ' / ' + seller;
+    const buyer = iom.buyer_wbs_cc || '-';
+    const seller = iom.seller_wbs_cc || '-';
+    iomWbs.textContent = 'WBS: ' + buyer + ' / ' + seller;
 
-          // new fields
-          document.getElementById('iomSite').textContent = 'Site: ' + (iom.site || '—');
-          document.getElementById('iomFunction').textContent = 'Function: ' + (iom.function || '—');
+    iomSite.textContent = 'Site: ' + (iom.site || '—');
+    iomFunction.textContent = 'Function: ' + (iom.function || '—');
 
-          iomMonthFte.textContent = (parseFloat(iom.month_fte||0)).toFixed(4);
-          iomMonthHrs.textContent = (parseFloat(iom.month_hours||0)).toFixed(2);
+    iomMonthFte.textContent = (parseFloat(iom.month_fte||0)).toFixed(4);
+    iomMonthHrs.textContent = (parseFloat(iom.month_hours||0)).toFixed(2);
 
-          // remaining values will be updated by validateAll() after saved rows load
-          iomRemFte.textContent = (parseFloat(iom.month_fte||0)).toFixed(4);
-          iomRemHrs.textContent = (parseFloat(iom.month_hours||0)).toFixed(2);
+    // remaining values from server (we update both kv and badge)
+    iomRemFte.textContent = (parseFloat(iom.remaining_fte||0)).toFixed(4);
+    iomRemHrs.textContent = (parseFloat(iom.remaining_hours||0)).toFixed(2);
 
-          iomDetailWrap.style.display = 'block';
-        }
+    // set current month limit (per-resource limit)
+    CURRENT_MONTH_LIMIT = parseFloat(iom.month_limit || DEFAULT_MONTHLY_LIMIT);
 
+    // update allocation badge
+    allocBadge.textContent = 'Remaining: ' + (parseFloat(iom.remaining_hours||0)).toFixed(2) + 'h';
 
+    iomDetailWrap.style.display = 'block';
+  }
 
-  // Add Selected IOM button -> create separate allocations table and load saved allocations
+  // Add Selected IOM -> show details & load saved allocations (authoritative fetch)
   addIomBtn.addEventListener('click', async function() {
     if (!iomsDropdown.value) { alert('Please choose an IOM first'); return; }
     const selected = JSON.parse(iomsDropdown.value);
-    // Show IOM details and clear any previous allocation rows
-    showIomPreview(selected);
-    // Show allocation section
+    // fetch authoritative details and then load saved allocations
+    await fetchIomDetails(selected.iom_id);
     allocSectionWrap.style.display = 'block';
-    allocBody.innerHTML = ''; // clear
-    // Create header row (display only: dept/iom/wbs/total hr placed above table)
-    // Here we simply show allocation badge and load saved resources
-    allocBadge.textContent = 'Remaining: ' + (parseFloat(selected.month_hours||0)).toFixed(2) + 'h';
-    // Load saved rows (IMPORTANT: pass iom_id string)
+    allocBody.innerHTML = ''; // clear previous rows
+    // load saved rows for the selected IOM
     await loadSavedAllocations(selected.iom_id);
-    // Update validation to reflect loaded rows
     validateAll();
   });
+
+  // fetch IOM details (from server) and show them
+  async function fetchIomDetails(iom_row_id) {
+    try {
+      const project_id = projectSelect.value;
+      const year = yearInput.value;
+      const month = monthSelect.value;
+      if (!project_id || !iom_row_id) return;
+      const url = new URL(GET_IOM_DETAILS_URL, window.location.origin);
+      url.searchParams.set('project_id', project_id);
+      url.searchParams.set('iom_row_id', iom_row_id);
+      url.searchParams.set('year', year);
+      url.searchParams.set('month', month);
+      const res = await fetch(url.toString(), { credentials: 'same-origin' });
+      if (!res.ok) {
+        console.warn('fetchIomDetails failed', res.status);
+        return;
+      }
+      const data = await res.json();
+      if (!data.ok) {
+        console.warn('fetchIomDetails server responded not ok', data);
+        return;
+      }
+      const iom = data.iom;
+      if (iom) {
+        // server response includes month_limit and remaining fields (see updated view)
+        showIomPreview(iom);
+      }
+    } catch (err) {
+      console.warn('fetchIomDetails', err);
+    }
+  }
 
   // Load saved allocations for an iom_id (string)
   async function loadSavedAllocations(iom_id) {
@@ -339,14 +366,13 @@ Complete client-side logic:
       if (!res.ok) { console.warn('loadSavedAllocations failed', res.status); return; }
       const data = await res.json();
       if (!data.ok) { console.warn('loadSavedAllocations server', data); return; }
-      // clear existing resource rows and render saved ones
       allocBody.innerHTML = '';
       const saved = data.saved_items || [];
       if (saved.length === 0) {
         allocBody.innerHTML = '<tr class="empty-state"><td colspan="3" class="text-muted">No resources assigned yet.</td></tr>';
       } else {
         saved.forEach(s => {
-          addResourceRow(iom_id, { ldap: s.user_ldap, hours: s.total_hours });
+          addResourceRow(iom_id, { ldap: s.user_ldap, hours: parseFloat(s.total_hours || 0) });
         });
       }
       validateAll();
@@ -357,7 +383,6 @@ Complete client-side logic:
 
   // Add resource row - left aligned
   function addResourceRow(iom_id, prefill = {}) {
-    // remove empty-state if present
     const empty = allocBody.querySelector('.empty-state');
     if (empty) empty.remove();
 
@@ -368,7 +393,7 @@ Complete client-side logic:
         <input type="text" class="form-control user_ldap" placeholder="start typing (3+ chars)" value="${escapeHtml(prefill.ldap||'')}" />
         <div class="ldap-suggest" style="display:none; position:absolute; left:0; top:44px; z-index:1200; background:#fff; border:1px solid #eef2f7; border-radius:8px; max-height:220px; overflow:auto;"></div>
       </td>
-      <td><input type="number" class="form-control resource-hours" step="0.25" min="0" value="${Number(prefill.hours||0).toFixed(2)}" /></td>
+      <td><input type="number" class="form-control resource-hours" step="0.25" min="0" value="${(typeof prefill.hours !== 'undefined') ? parseFloat(prefill.hours).toFixed(2) : '0.00'}" /></td>
       <td class="remove-td"><button class="btn btn-outline btn-compact removeBtn">Remove</button></td>
     `;
     allocBody.appendChild(tr);
@@ -416,9 +441,6 @@ Complete client-side logic:
   }
 
   addResourceBtn.addEventListener('click', () => {
-    // add under last added IOM; we require a visible IOM selected (allocSectionWrap shown)
-    const lastHeader = document.querySelector('tr[data-parent-iom]') || null;
-    // But since we only store parent via dataset on rows, simply find current selected IOM from dropdown preview
     if (!iomsDropdown.value) { alert('Please select and add an IOM first'); return; }
     const currentIom = JSON.parse(iomsDropdown.value);
     addResourceRow(currentIom.iom_id);
@@ -426,10 +448,9 @@ Complete client-side logic:
 
   // Validation & Remaining calculation
   function validateAll() {
-    // gather available hours for each IOM header (we rely on current selected iom preview)
     const currentIom = iomsDropdown.value ? JSON.parse(iomsDropdown.value) : null;
     const totalAvailable = currentIom ? Number(currentIom.month_hours || 0) : 0;
-    // sum allocated hours for current IOM
+
     const rows = Array.from(allocBody.querySelectorAll('tr')).filter(r => r.dataset && r.dataset.parentIom);
     let sum = 0;
     let anyInvalid = false;
@@ -443,26 +464,23 @@ Complete client-side logic:
       const rowErrors = [];
       if (!ldapVal.trim()) rowErrors.push('missing resource');
       if (!(hoursVal > 0)) rowErrors.push('hours <= 0');
-      if (hoursVal > MAX_HOURS_PER_RESOURCE) rowErrors.push(`> ${MAX_HOURS_PER_RESOURCE}h`);
+
+      // per-resource month limit: CURRENT_MONTH_LIMIT
+      if (hoursVal > CURRENT_MONTH_LIMIT + 0.0001) rowErrors.push(`> ${CURRENT_MONTH_LIMIT}h`);
 
       if (rowErrors.length) {
         r.classList.add('row-invalid'); anyInvalid = true; reasons.push(rowErrors.join(', '));
       }
-      sum += hoursVal;
+      // Ensure numeric 2-decimal sum (but don't mutate displayed value)
+      sum += Math.round(hoursVal * 100) / 100;
     });
 
-    const remaining = Math.max(0, totalAvailable - sum);
+    const remaining = Math.max(0, Math.round((totalAvailable - sum) * 100) / 100);
     allocBadge.textContent = 'Remaining: ' + remaining.toFixed(2) + 'h';
-    // Also update IOM details remaining display if visible
     if (iomRemHrs) iomRemHrs.textContent = remaining.toFixed(2);
 
-    // Save disabled if:
-    // - no resource rows OR
-    // - any invalid row OR
-    // - sum exceeds totalAvailable OR
-    // - remaining == totalAvailable (means nothing allocated?) -> allow save only if at least one row exists and sum > 0
     const hasRows = rows.length > 0;
-    const overAllocated = sum > totalAvailable;
+    const overAllocated = sum > totalAvailable + 0.0001;
     const sumIsZero = sum === 0;
 
     let disable = false;
@@ -484,13 +502,18 @@ Complete client-side logic:
     const validation = validateAll();
     if (!validation.valid) { alert('Cannot save: ' + (saveTooltip.textContent || 'fix errors')); return; }
 
-    // gather rows
+    // gather rows (keep decimals)
     const rows = Array.from(allocBody.querySelectorAll('tr')).filter(r => r.dataset && r.dataset.parentIom);
-    const items = rows.map(r => ({
-      iom_id: r.dataset.parentIom,
-      user_ldap: (r.querySelector('.user_ldap') || {}).value || '',
-      total_hours: Math.round(parseFloat((r.querySelector('.resource-hours') || {}).value || 0))
-    }));
+    const items = rows.map(r => {
+      const hoursRaw = parseFloat((r.querySelector('.resource-hours') || {}).value || 0) || 0;
+      // preserve 2 decimal places
+      const hours2 = Math.round(hoursRaw * 100) / 100;
+      return {
+        iom_id: r.dataset.parentIom,
+        user_ldap: (r.querySelector('.user_ldap') || {}).value || '',
+        total_hours: hours2
+      };
+    });
 
     const project_id = projectSelect.value;
     const month_start = `${yearInput.value}-${String(monthSelect.value).padStart(2,'0')}-01`;
@@ -508,6 +531,7 @@ Complete client-side logic:
         console.error('save response', data);
         return;
       }
+
       // Re-render saved rows returned by server (expecting saved grouped by iom_id)
       if (data.saved && typeof data.saved === 'object') {
         Object.keys(data.saved).forEach(iomId => {
@@ -517,11 +541,11 @@ Complete client-side logic:
           (data.saved[iomId] || []).forEach(s => addResourceRow(iomId, { ldap: s.user_ldap, hours: s.total_hours }));
         });
         validateAll();
-        // update IOM details by fetching fresh details (optional; won't break if endpoint missing)
+        // update IOM details by fetching fresh details (refresh remaining & month_limit)
         Object.keys(data.saved).forEach(iomId => fetchIomDetails(iomId));
         alert('Allocations saved successfully');
       } else {
-        // fallback if server returns saved_items or other format: simply reload saved using selected IOM
+        // fallback: reload saved for currently selected iom
         if (iomsDropdown.value) {
           const cur = JSON.parse(iomsDropdown.value);
           await loadSavedAllocations(cur.iom_id);
@@ -538,7 +562,7 @@ Complete client-side logic:
 
   saveBtn.addEventListener('click', saveAllocations);
 
-  // export allocations to excel (server generates .xlsx with openpyxl)
+  // export allocations to excel (server does openpyxl)
   exportBtn.addEventListener('click', function() {
     if (!iomsDropdown.value) { alert('Select and add an IOM first'); return; }
     const current = JSON.parse(iomsDropdown.value);
@@ -546,43 +570,12 @@ Complete client-side logic:
     const iom_id = current.iom_id;
     const month_start = `${yearInput.value}-${String(monthSelect.value).padStart(2,'0')}-01`;
     const params = new URLSearchParams({ project_id, iom_id, month_start });
-    // open download in same tab (or change to window.open for new tab)
     window.location = EXPORT_URL + '?' + params.toString();
   });
 
-  // fetch IOM details to refresh remaining after save
-  async function fetchIomDetails(iom_row_id) {
-    try {
-      const project_id = projectSelect.value;
-      const year = yearInput.value;
-      const month = monthSelect.value;
-      if (!project_id || !iom_row_id) return;
-      const url = new URL(GET_IOM_DETAILS_URL, window.location.origin);
-      url.searchParams.set('project_id', project_id);
-      url.searchParams.set('iom_row_id', iom_row_id);
-      url.searchParams.set('year', year);
-      url.searchParams.set('month', month);
-      const res = await fetch(url.toString(), { credentials: 'same-origin' });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data.ok) return;
-      const iom = data.iom;
-      if (iom) {
-        // update preview and badge/remaining
-        showIomPreview(iom);
-        allocBadge.textContent = 'Remaining: ' + (Number(iom.remaining_hours || iom.month_hours || 0)).toFixed(2) + 'h';
-        // update header dataset if you store it
-        validateAll();
-      }
-    } catch (err) {
-      console.warn('fetchIomDetails', err);
-    }
-  }
-
-  // wire initial state: optionally auto-load IOMs if project present
+  // init
   (function init() {
-    // if you want auto-load:
-    // if (projectSelect.value) loadIoms();
+    // optionally auto-load IOMs for default project
   })();
 
 })();

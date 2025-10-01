@@ -1044,6 +1044,7 @@ def api_projects(request):
         p['mapped_coe_count'] = counts.get(p['id'], 0)
     return JsonResponse({"projects": projects})
 
+# --- get_allocations_for_iom (returns saved rows for requested iom_id + month_start) ---
 @require_GET
 def get_allocations_for_iom(request):
     project_id = request.GET.get("project_id")
@@ -1051,37 +1052,77 @@ def get_allocations_for_iom(request):
     month_start = request.GET.get("month_start")
     if not (project_id and iom_row_id and month_start):
         return JsonResponse({"ok": False, "error": "missing params"}, status=400)
-    with connection.cursor() as cur:
-        cur.execute("""
-            SELECT user_ldap, total_hours
-            FROM monthly_allocation_entries
-            WHERE project_id=%s AND iom_id=%s AND month_start=%s
-        """, (project_id, iom_row_id, month_start))
-        rows = cur.fetchall()
-    return JsonResponse({"ok": True, "saved_items": [{"user_ldap":r[0],"total_hours":r[1]} for r in rows]})
+
+    try:
+        with connection.cursor() as cur:
+            cur.execute("""
+                SELECT user_ldap, total_hours
+                FROM monthly_allocation_entries
+                WHERE project_id=%s AND iom_id=%s AND month_start=%s
+            """, (project_id, iom_row_id, month_start))
+            rows = cur.fetchall() or []
+    except Exception as exc:
+        logger.exception("get_allocations_for_iom failed: %s", exc)
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+    saved_items = [{"user_ldap": r[0], "total_hours": float(r[1] or 0)} for r in rows]
+    return JsonResponse({"ok": True, "saved_items": saved_items})
+
 
 @require_POST
 def save_monthly_allocations(request):
     try:
-        data=json.loads(request.body)
-    except: return JsonResponse({"ok":False,"error":"invalid json"},status=400)
-    project_id=data.get("project_id"); month_start=data.get("month_start"); items=data.get("items",[])
-    if not(project_id and month_start): return JsonResponse({"ok":False,"error":"missing params"},status=400)
-    grouped={}
+        data = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"ok": False, "error": "invalid json"}, status=400)
+
+    project_id = data.get("project_id")
+    month_start = data.get("month_start")
+    items = data.get("items", [])
+    if not (project_id and month_start):
+        return JsonResponse({"ok": False, "error": "missing params"}, status=400)
+
+    grouped = {}
     for it in items:
-        iom_id=it.get("iom_id"); ldap=(it.get("user_ldap") or "").strip(); hrs=int(it.get("total_hours") or 0)
-        if not iom_id or not ldap or hrs<=0: continue
-        grouped.setdefault(iom_id,[]).append((ldap,hrs))
-    saved={}
-    with transaction.atomic():
-        with connection.cursor() as cur:
-            for iom_id,rows in grouped.items():
-                cur.execute("DELETE FROM monthly_allocation_entries WHERE project_id=%s AND iom_id=%s AND month_start=%s",(project_id,iom_id,month_start))
-                for ldap,hrs in rows:
-                    cur.execute("INSERT INTO monthly_allocation_entries(project_id,iom_id,month_start,user_ldap,total_hours) VALUES(%s,%s,%s,%s,%s)",(project_id,iom_id,month_start,ldap,hrs))
-                cur.execute("SELECT user_ldap,total_hours FROM monthly_allocation_entries WHERE project_id=%s AND iom_id=%s AND month_start=%s",(project_id,iom_id,month_start))
-                saved[iom_id]=[{"user_ldap":r[0],"total_hours":r[1]} for r in cur.fetchall()]
-    return JsonResponse({"ok":True,"saved":saved})
+        iom_id = it.get("iom_id")
+        ldap = (it.get("user_ldap") or "").strip()
+        try:
+            # ensure numeric and keep 2 decimals
+            hrs = round(float(it.get("total_hours") or 0), 2)
+        except Exception:
+            continue
+        if not iom_id or not ldap or hrs <= 0:
+            continue
+        grouped.setdefault(iom_id, []).append((ldap, hrs))
+
+    saved = {}
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                for iom_id, rows in grouped.items():
+                    # delete existing for the same project,iom,month
+                    cur.execute(
+                        "DELETE FROM monthly_allocation_entries WHERE project_id=%s AND iom_id=%s AND month_start=%s",
+                        (project_id, iom_id, month_start)
+                    )
+                    # insert new rows (store floats)
+                    for ldap, hrs in rows:
+                        cur.execute("""
+                            INSERT INTO monthly_allocation_entries
+                            (project_id, iom_id, month_start, user_ldap, total_hours, created_at)
+                            VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        """, (project_id, iom_id, month_start, ldap, hrs))
+                    # fetch saved rows for this iom_id to return
+                    cur.execute("""
+                        SELECT user_ldap, total_hours FROM monthly_allocation_entries
+                        WHERE project_id=%s AND iom_id=%s AND month_start=%s
+                    """, (project_id, iom_id, month_start))
+                    saved[iom_id] = [{"user_ldap": r[0], "total_hours": float(r[1] or 0)} for r in cur.fetchall()]
+        return JsonResponse({"ok": True, "saved": saved})
+    except Exception as exc:
+        logger.exception("save_monthly_allocations failed: %s", exc)
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
 
 
 # -------------------------
@@ -1824,29 +1865,34 @@ def monthly_allocations(request):
         "now": datetime.now(),
     })
 
+def _get_month_hours_limit(year, month):
+    """
+    Look up monthly-hours-per-employee from table `monthly_hours_limit`.
+    Expected schema (example): monthly_hours_limit(year INT, month INT, max_hours DECIMAL(6,2))
+    Returns float. Falls back to HOURS_AVAILABLE_PER_MONTH on error / not-found.
+    """
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SELECT max_hours FROM monthly_hours_limit WHERE year = %s AND month = %s LIMIT 1", (int(year), int(month)))
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                return float(row[0])
+    except Exception:
+        logger.exception("_get_month_hours_limit failed")
+    return float(HOURS_AVAILABLE_PER_MONTH)
 
-
+@require_GET
 def get_applicable_ioms(request):
-    """
-    Returns IOM list filtered by project, year, month and creator = logged user.
-    Show only IOMs that have actual values for the selected month:
-      - month_fte > 0 OR month_hours > 0
-    Matching for creator uses the converted CN and ldap username (lower(trim(...))).
-    """
-    print("[get_applicable_ioms] called")
     session_ldap = request.session.get("ldap_username")
     session_cn = request.session.get("cn")
-    print("[get_applicable_ioms] session_ldap:", session_ldap, " session_cn:", session_cn)
 
     def _cn_to_creator(cn):
-        if not cn:
-            return ""
+        if not cn: return ""
         parts = str(cn).strip().split()
         if len(parts) >= 2:
             return " ".join(parts[1:]) + " " + parts[0]
         return str(cn).strip()
 
-    # build list of candidate creator strings (deduped)
     creator_candidates = []
     if session_cn:
         conv = _cn_to_creator(session_cn).strip()
@@ -1859,15 +1905,13 @@ def get_applicable_ioms(request):
         sld = session_ldap.strip()
         if sld and sld.lower() not in [c.lower() for c in creator_candidates]:
             creator_candidates.append(sld)
-
     creator_lower_vals = [c.lower() for c in creator_candidates]
-    print("[get_applicable_ioms] creator_lower_vals:", creator_lower_vals)
 
     project_id = request.GET.get("project_id")
     try:
         year = int(request.GET.get("year") or datetime.now().year)
         month = int(request.GET.get("month") or datetime.now().month)
-    except ValueError:
+    except Exception:
         return HttpResponseBadRequest("Invalid year/month")
 
     _MONTH_MAP = {
@@ -1885,11 +1929,9 @@ def get_applicable_ioms(request):
         12: ("dec_fte", "dec_hours"),
     }
     fte_col, hrs_col = _MONTH_MAP.get(month, ("jan_fte", "jan_hours"))
-    print("[get_applicable_ioms] fte_col:", fte_col, " hrs_col:", hrs_col)
 
-    # Note: we filter for values > 0 (either fte or hours) so only meaningful IOMs appear
     sql = f"""
-        SELECT id, iom_id, department,site,'function',
+        SELECT id, iom_id, department, site, `function`,
                {fte_col} as month_fte, {hrs_col} as month_hours,
                buyer_wbs_cc, seller_wbs_cc
         FROM prism_wbs
@@ -1897,11 +1939,9 @@ def get_applicable_ioms(request):
           AND ( ({fte_col} IS NOT NULL AND {fte_col} > 0) OR ({hrs_col} IS NOT NULL AND {hrs_col} > 0) )
     """
     params = [str(year)]
-
     if project_id:
         sql += " AND project_id = %s"
         params.append(project_id)
-
     if creator_lower_vals:
         placeholders = ",".join(["%s"] * len(creator_lower_vals))
         sql += f" AND LOWER(TRIM(creator)) IN ({placeholders})"
@@ -1912,13 +1952,15 @@ def get_applicable_ioms(request):
     try:
         with connection.cursor() as cur:
             cur.execute(sql, params)
-            rows = cur.fetchall()
+            rows = cur.fetchall() or []
             cols = [c[0] for c in cur.description]
     except Exception as ex:
-        print("[get_applicable_ioms] DB error:", ex)
+        logger.exception("get_applicable_ioms DB error: %s", ex)
         return JsonResponse({"ok": False, "error": str(ex)}, status=500)
 
     ioms = []
+    # get month_limit (per-resource limit) once per request
+    month_limit = _get_month_hours_limit(year, month)
     for r in rows:
         rec = dict(zip(cols, r))
         ioms.append({
@@ -1931,18 +1973,15 @@ def get_applicable_ioms(request):
             "month_hours": float(rec.get("month_hours") or 0),
             "buyer_wbs_cc": rec.get("buyer_wbs_cc"),
             "seller_wbs_cc": rec.get("seller_wbs_cc"),
+            "month_limit": float(month_limit),
         })
-
-    print("[get_applicable_ioms] returning ioms:", len(ioms))
     return JsonResponse({"ok": True, "ioms": ioms})
 
+
+# --- get_iom_details: fetch by id OR iom_id, compute remaining hours (from monthly_allocation_entries),
+#     and remaining FTE = remaining_hours / month_limit(year,month) ---
+@require_GET
 def get_iom_details(request):
-    """
-    AJAX: Given prism_wbs.id (iom row id), year, month, return detailed IOM info + remaining FTE/hours:
-      - Queries prism_wbs for month_fte and month_hours
-      - Sums allocation_items for that prism_wbs for allocations in the same project+month to compute used hours
-    Params: iom_row_id, project_id, year, month
-    """
     iom_row_id = request.GET.get("iom_row_id")
     project_id = request.GET.get("project_id")
     try:
@@ -1950,11 +1989,9 @@ def get_iom_details(request):
         month = int(request.GET.get("month") or datetime.now().month)
     except ValueError:
         return HttpResponseBadRequest("Invalid year/month")
-
     if not iom_row_id:
         return HttpResponseBadRequest("iom_row_id required")
 
-    # month columns
     _MONTH_MAP = {
         1: ("jan_fte", "jan_hours"),
         2: ("feb_fte", "feb_hours"),
@@ -1971,32 +2008,42 @@ def get_iom_details(request):
     }
     fte_col, hrs_col = _MONTH_MAP.get(month, ("jan_fte", "jan_hours"))
 
-    with connection.cursor() as cur:
-        # fetch pris_wbs row
-        cur.execute(f"SELECT id, iom_id, project_id, department, {fte_col} as month_fte, {hrs_col} as month_hours, total_fte, total_hours, buyer_wbs_cc, seller_wbs_cc FROM prism_wbs WHERE id = %s LIMIT 1", [iom_row_id])
-        row = cur.fetchone()
-        if not row:
-            return JsonResponse({"ok": False, "error": "IOM not found"}, status=404)
-        cols = [c[0] for c in cur.description]
-        rec = dict(zip(cols, row))
+    try:
+        with connection.cursor() as cur:
+            cur.execute(f"""
+                SELECT id, iom_id, project_id, department, site, `function`,
+                       {fte_col} as month_fte, {hrs_col} as month_hours,
+                       buyer_wbs_cc, seller_wbs_cc
+                FROM prism_wbs
+                WHERE id = %s OR iom_id = %s
+                LIMIT 1
+            """, [iom_row_id, iom_row_id])
+            row = cur.fetchone()
+            if not row:
+                return JsonResponse({"ok": False, "error": "IOM not found"}, status=404)
+            cols = [c[0] for c in cur.description]
+            rec = dict(zip(cols, row))
 
-        # compute used hours for that IOM's project and month:
-        # find allocations for the project & month_start
-        # month_start date string needed: YYYY-MM-01
-        month_start = f"{year}-{str(month).zfill(2)}-01"
-        cur.execute("""
-            SELECT COALESCE(SUM(ai.total_hours),0) FROM allocation_items ai
-            JOIN allocations a ON ai.allocation_id = a.id
-            WHERE ai.project_id = %s AND a.month_start = %s
-            -- optionally restrict to this iom if allocation_items hold a pointer to prism_wbs row (if you store iom_id in allocation_items)
-        """, [project_id, month_start])
-        used_hours = cur.fetchone()[0] or 0
+            month_start = f"{year}-{str(month).zfill(2)}-01"
 
-    month_hours = float(rec.get("month_hours") or 0)
-    month_fte = float(rec.get("month_fte") or 0)
-    remaining_hours = max(0.0, month_hours - used_hours)
-    # remaining FTE proportionally computed (if month_hours > 0)
-    remaining_fte = (remaining_hours / month_hours * month_fte) if month_hours > 0 else 0.0
+            # compute used hours for this IOM from monthly_allocation_entries (this table is used by UI)
+            cur.execute("""
+                SELECT COALESCE(SUM(total_hours),0) FROM monthly_allocation_entries
+                WHERE project_id=%s AND iom_id=%s AND month_start=%s
+            """, [project_id, rec.get("iom_id"), month_start])
+            used_hours = cur.fetchone()[0] or 0.0
+
+    except Exception as ex:
+        logger.exception("get_iom_details failed: %s", ex)
+        return JsonResponse({"ok": False, "error": str(ex)}, status=500)
+
+    month_hours = float(rec.get("month_hours") or 0.0)
+    month_fte = float(rec.get("month_fte") or 0.0)
+    remaining_hours = max(0.0, month_hours - float(used_hours))
+
+    # compute remaining_fte measured as remaining_hours / monthly limit (DB-driven)
+    month_limit = _get_month_hours_limit(year, month)
+    remaining_fte = (remaining_hours / month_limit) if month_limit > 0 else 0.0
 
     resp = {
         "ok": True,
@@ -2004,33 +2051,36 @@ def get_iom_details(request):
             "id": rec.get("id"),
             "iom_id": rec.get("iom_id"),
             "department": rec.get("department"),
-            "month_fte": month_fte,
-            "month_hours": month_hours,
+            "site": rec.get("site"),
+            "function": rec.get("function"),
+            "month_fte": float(month_fte),
+            "month_hours": float(month_hours),
             "total_fte": float(rec.get("total_fte") or 0),
             "total_hours": float(rec.get("total_hours") or 0),
             "buyer_wbs_cc": rec.get("buyer_wbs_cc"),
             "seller_wbs_cc": rec.get("seller_wbs_cc"),
             "remaining_hours": float(remaining_hours),
             "remaining_fte": float(remaining_fte),
+            "month_limit": float(month_limit),
         }
     }
     return JsonResponse(resp)
+
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from django.http import HttpResponse
 
+@require_GET
 def export_allocations(request):
     project_id = request.GET.get("project_id")
     iom_id = request.GET.get("iom_id")
     month_start = request.GET.get("month_start")
 
-    # --- 1. Get IOM details
     iom = None
     with connection.cursor() as cur:
         cur.execute("""
-            SELECT iom_id, department, buyer_wbs_cc, seller_wbs_cc,
-                   site, 'function', total_hours
+            SELECT iom_id, department, buyer_wbs_cc, seller_wbs_cc, site, `function`, total_hours
             FROM prism_wbs
             WHERE project_id=%s AND iom_id=%s
             LIMIT 1
@@ -2047,68 +2097,58 @@ def export_allocations(request):
                 "total_hours": row[6],
             }
 
-    # --- 2. Get allocations
     with connection.cursor() as cur:
         cur.execute("""
             SELECT user_ldap, total_hours
             FROM monthly_allocation_entries
             WHERE project_id=%s AND iom_id=%s AND month_start=%s
         """, [project_id, iom_id, month_start])
-        allocations = cur.fetchall()
+        allocations = cur.fetchall() or []
 
-    # --- 3. Build Excel
+    # Build nicely formatted excel (openpyxl) - keep existing styling you had, with slight enhancements:
     wb = Workbook()
     ws = wb.active
     ws.title = "Allocations"
 
-    # Define styles
     header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
     bold_font = Font(name="Calibri", bold=True, size=11)
     normal_font = Font(name="Calibri", size=11)
     center = Alignment(horizontal="center", vertical="center")
     left = Alignment(horizontal="left", vertical="center")
     right = Alignment(horizontal="right", vertical="center")
-    fill_blue = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # dark blue
-    fill_lightblue = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")  # light blue
+    fill_blue = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     fill_gray = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
     border = Border(left=Side(style="thin"), right=Side(style="thin"),
                     top=Side(style="thin"), bottom=Side(style="thin"))
 
     row_idx = 1
-
-    # Title Row
-    ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=2)
+    # Title
+    ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=3)
     title_cell = ws.cell(row=row_idx, column=1, value="IOM Allocation Report")
     title_cell.font = Font(name="Calibri", bold=True, size=14, color="FFFFFF")
     title_cell.alignment = center
-    ws.row_dimensions[row_idx].height = 24
     title_cell.fill = fill_blue
     row_idx += 2
 
-    # --- IOM Detail Section
     if iom:
         details = [
             ("IOM ID", iom["iom_id"]),
             ("Department", iom["department"]),
             ("WBS", f'{iom["buyer_wbs_cc"] or "-"} / {iom["seller_wbs_cc"] or "-"}'),
-            ("Site", iom["site"]),
-            ("Function", iom["function"]),
-            ("Total Hours", iom["total_hours"]),
+            ("Site", iom["site"] or "-"),
+            ("Function", iom["function"] or "-"),
+            ("Total Hours", iom["total_hours"] or 0),
         ]
         for key, val in details:
             ws.cell(row=row_idx, column=1, value=key).font = bold_font
-            ws.cell(row=row_idx, column=1).alignment = left
             ws.cell(row=row_idx, column=1).fill = fill_gray
             ws.cell(row=row_idx, column=1).border = border
-
             ws.cell(row=row_idx, column=2, value=val).font = normal_font
-            ws.cell(row=row_idx, column=2).alignment = left
             ws.cell(row=row_idx, column=2).border = border
             row_idx += 1
+        row_idx += 1
 
-        row_idx += 1  # blank line
-
-    # --- Allocations Section Header
+    # Allocations header
     ws.cell(row=row_idx, column=1, value="Resource (LDAP)").font = header_font
     ws.cell(row=row_idx, column=1).fill = fill_blue
     ws.cell(row=row_idx, column=1).alignment = center
@@ -2120,19 +2160,17 @@ def export_allocations(request):
     ws.cell(row=row_idx, column=2).border = border
     row_idx += 1
 
-    # --- Allocation Rows
     for alloc in allocations:
         ws.cell(row=row_idx, column=1, value=alloc[0]).font = normal_font
         ws.cell(row=row_idx, column=1).alignment = left
         ws.cell(row=row_idx, column=1).border = border
 
-        ws.cell(row=row_idx, column=2, value=alloc[1]).font = normal_font
+        ws.cell(row=row_idx, column=2, value=float(alloc[1] or 0)).font = normal_font
         ws.cell(row=row_idx, column=2).alignment = right
         ws.cell(row=row_idx, column=2).border = border
         row_idx += 1
 
-    # Auto-fit columns
-
+    # Auto-fit columns (simple heuristic)
     for idx, col in enumerate(ws.columns, 1):
         max_length = 0
         col_letter = get_column_letter(idx)
@@ -2142,12 +2180,9 @@ def export_allocations(request):
                     max_length = max(max_length, len(str(cell.value)))
                 except Exception:
                     pass
-        ws.column_dimensions[col_letter].width = max_length + 3
+        ws.column_dimensions[col_letter].width = max_length + 4
 
-    # --- Response
-    response = HttpResponse(
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     filename = f"allocations_{iom_id}_{month_start}.xlsx"
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     wb.save(response)
