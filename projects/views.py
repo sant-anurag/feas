@@ -21,6 +21,9 @@ from django.views.decorators.http import require_GET, require_POST, require_http
 
 import mysql.connector
 from mysql.connector import Error, IntegrityError
+from django.http import JsonResponse, HttpResponseBadRequest
+from django.db import connection
+from datetime import datetime
 
 PAGE_SIZE = 10
 # -------------------------
@@ -2012,21 +2015,43 @@ def monthly_allocations(request):
     })
 
 
+
 def get_applicable_ioms(request):
     """
-    AJAX: returns IOM list filtered by project, year, month and creator = logged user.
-    Query params: project_id, year, month, search (optional)
+    Returns IOM list filtered by project, year, month and creator = logged user.
+    Show only IOMs that have actual values for the selected month:
+      - month_fte > 0 OR month_hours > 0
+    Matching for creator uses the converted CN and ldap username (lower(trim(...))).
     """
-    print("get_applicable_ioms called")
+    print("[get_applicable_ioms] called")
     session_ldap = request.session.get("ldap_username")
-    # Determine creator value(s) same as edit project logic:
-    # Use session["cn"] if available else ldap_username.
     session_cn = request.session.get("cn")
+    print("[get_applicable_ioms] session_ldap:", session_ldap, " session_cn:", session_cn)
+
+    def _cn_to_creator(cn):
+        if not cn:
+            return ""
+        parts = str(cn).strip().split()
+        if len(parts) >= 2:
+            return " ".join(parts[1:]) + " " + parts[0]
+        return str(cn).strip()
+
+    # build list of candidate creator strings (deduped)
     creator_candidates = []
     if session_cn:
-        creator_candidates.append(session_cn)
+        conv = _cn_to_creator(session_cn).strip()
+        if conv and conv.lower() not in [c.lower() for c in creator_candidates]:
+            creator_candidates.append(conv)
+        s = session_cn.strip()
+        if s and s.lower() not in [c.lower() for c in creator_candidates]:
+            creator_candidates.append(s)
     if session_ldap:
-        creator_candidates.append(session_ldap)
+        sld = session_ldap.strip()
+        if sld and sld.lower() not in [c.lower() for c in creator_candidates]:
+            creator_candidates.append(sld)
+
+    creator_lower_vals = [c.lower() for c in creator_candidates]
+    print("[get_applicable_ioms] creator_lower_vals:", creator_lower_vals)
 
     project_id = request.GET.get("project_id")
     try:
@@ -2035,9 +2060,6 @@ def get_applicable_ioms(request):
     except ValueError:
         return HttpResponseBadRequest("Invalid year/month")
 
-    search = (request.GET.get("search") or "").strip()
-
-    # pick fte/month column names
     _MONTH_MAP = {
         1: ("jan_fte", "jan_hours"),
         2: ("feb_fte", "feb_hours"),
@@ -2053,27 +2075,41 @@ def get_applicable_ioms(request):
         12: ("dec_fte", "dec_hours"),
     }
     fte_col, hrs_col = _MONTH_MAP.get(month, ("jan_fte", "jan_hours"))
+    print("[get_applicable_ioms] fte_col:", fte_col, " hrs_col:", hrs_col)
 
-    # Build query: filter by year, project_id, and creator IN (...)
-    sql = f"SELECT id, iom_id, department, {fte_col} as month_fte, {hrs_col} as month_hours, buyer_wbs_cc, seller_wbs_cc FROM prism_wbs WHERE year = %s AND ({fte_col} IS NOT NULL AND {fte_col} > 0)"
+    # Note: we filter for values > 0 (either fte or hours) so only meaningful IOMs appear
+    sql = f"""
+        SELECT id, iom_id, department,
+               {fte_col} as month_fte, {hrs_col} as month_hours,
+               buyer_wbs_cc, seller_wbs_cc
+        FROM prism_wbs
+        WHERE year = %s
+          AND ( ({fte_col} IS NOT NULL AND {fte_col} > 0) OR ({hrs_col} IS NOT NULL AND {hrs_col} > 0) )
+    """
     params = [str(year)]
+
     if project_id:
         sql += " AND project_id = %s"
         params.append(project_id)
-    if creator_candidates:
-        placeholders = ",".join(["%s"] * len(creator_candidates))
-        sql += f" AND creator IN ({placeholders})"
-        params.extend(creator_candidates)
-    if search:
-        sql += " AND (iom_id LIKE %s OR department LIKE %s)"
-        like = f"%{search}%"
-        params.extend([like, like])
+
+    if creator_lower_vals:
+        placeholders = ",".join(["%s"] * len(creator_lower_vals))
+        sql += f" AND LOWER(TRIM(creator)) IN ({placeholders})"
+        params.extend(creator_lower_vals)
+
     sql += " ORDER BY iom_id LIMIT 500"
 
-    with connection.cursor() as cur:
-        cur.execute(sql, params)
-        rows = cur.fetchall()
-        cols = [c[0] for c in cur.description]
+    print("[get_applicable_ioms] sql:", sql)
+    print("[get_applicable_ioms] params:", params)
+
+    try:
+        with connection.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            cols = [c[0] for c in cur.description]
+    except Exception as ex:
+        print("[get_applicable_ioms] DB error:", ex)
+        return JsonResponse({"ok": False, "error": str(ex)}, status=500)
 
     ioms = []
     for r in rows:
@@ -2087,7 +2123,8 @@ def get_applicable_ioms(request):
             "buyer_wbs_cc": rec.get("buyer_wbs_cc"),
             "seller_wbs_cc": rec.get("seller_wbs_cc"),
         })
-        print("found iom :",rec)
+
+    print("[get_applicable_ioms] returning ioms:", len(ioms))
     return JsonResponse({"ok": True, "ioms": ioms})
 
 def get_iom_details(request):

@@ -1,0 +1,199 @@
+/* static/css/monthly_allocations.css
+   Professional styling for Monthly Allocations page
+   Tweak color variables below to match brand. */
+:root{
+  --bg:#f3f7fb;
+  --card:#ffffff;
+  --muted:#6b7280;
+  --primary:#1e66d6;         /* strong blue */
+  --primary-600:#1257c8;
+  --accent:#0ea5a4;          /* teal-ish accent (optional) */
+  --surface-shadow: 0 10px 30px rgba(18,42,95,0.06);
+  --radius:12px;
+  --gap:14px;
+  --radius-sm:8px;
+  --text:#1f2937;
+  --border:#e6eef8;
+  --success:#16a34a;
+}
+
+/* Page background */
+body {
+  background: linear-gradient(180deg, #f7fbfe 0%, #f3f7fb 100%);
+  color: var(--text);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  line-height:1.4;
+}
+
+/* Main card */
+.alloc-card {
+  max-width: 1150px;
+  margin: 28px auto;
+  padding: 26px;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--surface-shadow);
+  border: 1px solid var(--border);
+}
+
+/* Header */
+.alloc-card h3 {
+  margin:0 0 6px;
+  font-weight:700;
+  font-size:1.45rem;
+  color: var(--text);
+}
+.alloc-card .sub {
+  color: var(--muted);
+  font-size:0.92rem;
+  margin-bottom: 14px;
+}
+
+/* Top controls layout */
+.alloc-toprow {
+  display:flex;
+  align-items:flex-end;
+  gap: var(--gap);
+  margin-bottom: 14px;
+  flex-wrap:wrap;
+}
+.alloc-controls .control {
+  display:flex;
+  flex-direction:column;
+}
+.alloc-controls label {
+  font-size:0.9rem;
+  font-weight:600;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+
+/* Uniform input styles */
+.form-control, .form-select {
+  border:1px solid #dbe9fb;
+  background: linear-gradient(180deg,#fff,#fbfdff);
+  padding:9px 10px;
+  height:38px;
+  border-radius:8px;
+  box-shadow:none;
+  font-size:0.95rem;
+  color:var(--text);
+}
+.form-select {
+  padding-right:32px;
+}
+.form-control:focus, .form-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 6px 20px rgba(30,102,214,0.08);
+}
+
+/* Buttons */
+.btn {
+  border-radius:8px;
+  padding:8px 12px;
+  font-weight:600;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+}
+.btn-primary {
+  background:var(--primary);
+  color:#fff;
+  border: none;
+  box-shadow: 0 6px 18px rgba(30,102,214,0.12);
+}
+.btn-primary:hover { background:var(--primary-600); }
+.btn-outline {
+  background: transparent;
+  border: 1px solid #d8e6ff;
+  color:var(--primary);
+}
+.btn-compact { padding:7px 10px; font-size:0.95rem; }
+
+/* IOM dropdown list */
+#iomsDropdown {
+  min-width: 360px;
+  max-width: 560px;
+  height:42px;
+  overflow:auto;
+}
+#iomsDropdown option {
+  padding:6px;
+}
+
+/* IOM preview card */
+#iomDetailCard {
+  border-radius:8px;
+  background:#fbfdff;
+  border:1px solid #eef6ff;
+  padding:12px 14px;
+  display:none;
+  margin-top:12px;
+}
+#iomDetailCard .label { color:var(--muted); font-size:0.85rem; }
+
+/* Table */
+.table-responsive { margin-top: 16px; }
+.table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:0.95rem;
+}
+.table thead th {
+  background: linear-gradient(180deg,#f6fbff,#fff);
+  border-bottom:2px solid #f0f6ff;
+  padding:12px 10px;
+  text-align:left;
+  font-weight:700;
+  color: #123;
+}
+.table tbody td {
+  border-bottom:1px solid #f1f6fb;
+  padding:10px;
+  vertical-align:middle;
+}
+.table tbody tr.empty-state td {
+  background:transparent;
+  color:var(--muted);
+  font-size:0.95rem;
+}
+
+/* Inputs inside table */
+.table input.form-control { height:36px; padding:6px 8px; font-size:0.92rem; }
+
+/* LDAP suggestion box (autocomplete) */
+.ldap-suggest {
+  position:absolute;
+  left:0;
+  right:0;
+  top:42px;
+  background:#fff;
+  border:1px solid #e6f0ff;
+  box-shadow: 0 8px 20px rgba(18,40,80,0.06);
+  z-index:1100;
+  max-height:220px;
+  overflow:auto;
+  border-radius:8px;
+}
+.ldap-suggest a {
+  display:block;
+  padding:8px 10px;
+  text-decoration:none;
+  color: #123;
+  border-bottom:1px dashed #f1f6fb;
+}
+.ldap-suggest a:hover { background: #f4fbff; }
+
+/* Small helpers */
+.small-muted { color:var(--muted); font-size:0.88rem; }
+.form-inline { display:flex; gap:10px; align-items:center; }
+
+/* Responsive tweaks */
+@media (max-width:980px) {
+  .alloc-card { padding:18px; margin:18px 12px; }
+  .alloc-toprow { flex-direction:column; align-items:stretch; }
+  #iomsDropdown { min-width:100%; }
+  .ldap-suggest { top:38px; }
+}

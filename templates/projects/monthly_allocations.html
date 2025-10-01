@@ -1,44 +1,51 @@
 {% extends "base.html" %}
 {% load static %}
 {% block content %}
-<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+
+<link rel="stylesheet" href="{% static 'projects/css/monthly_allocations.css' %}">
 <style>
-/* Small polished styling so the page looks professional immediately.
-   Move these rules to your site CSS (people.css / ui.css) if you prefer. */
-.alloc-card {
-  max-width: 1200px;
-  margin: 24px auto;
-  padding: 22px;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 6px 20px rgba(22,45,80,0.06);
+/* IOM detail: compact single-line stats */
+#iomDetailCard { display:flex; justify-content:space-between; align-items:center; gap:18px; margin-top:14px; }
+#iomDetailCard .iom-left { flex:1 1 auto; }
+#iomDetailCard .iom-right { flex:0 0 320px; text-align:right; font-size:0.95rem; color:var(--text); }
+#iomDetailCard .iom-right .stat { display:inline-block; margin-left:12px; color:var(--muted); }
+
+/* Make the four stats inline and slightly lighter label */
+#iomDetailCard .iom-right .stat strong { color:var(--text); margin-left:6px; font-weight:600; }
+
+/* Resource + Remove: stack Remove button under input to appear as "next line" visually */
+table#allocTable td.resource-td { position:relative; min-width:220px; }
+table#allocTable td.remove-td { width:120px; vertical-align:top; padding-top:6px; }
+table#allocTable td.remove-td .removeBtn { display:inline-block; margin-top:8px; }
+/* ensure on very narrow screens it stacks nicely */
+@media (max-width:900px) {
+  #iomDetailCard { flex-direction:column; align-items:flex-start; }
+  #iomDetailCard .iom-right { text-align:left; width:100%; margin-top:10px; }
+  table#allocTable td.remove-td { width:100%; }
+  table#allocTable td.remove-td .removeBtn { width:120px; }
 }
-.alloc-toprow { gap:14px; align-items:end; }
-.alloc-controls label { font-weight:600; font-size:0.92rem; color:#223; display:block; margin-bottom:6px; }
-#iomsDropdown { min-width:360px; }
-.table thead th { vertical-align: middle; text-align:left; }
-.table td input.form-control { height:34px; padding:6px 8px; }
-.ldap-suggest { position: absolute; z-index:1200; background:#fff; border:1px solid #ddd; width:100%; max-height:180px; overflow:auto; }
-.small-muted { color:#6c757d; font-size:0.85rem; }
-.btn-compact { padding:6px 10px; font-size:0.92rem; }
-.empty-state { color:#6c757d; padding:18px 12px; background:#f8f9fb; border-radius:6px; }
-@media (max-width:900px){
-  .alloc-toprow { flex-direction:column; align-items:stretch; }
-  #iomsDropdown { min-width:100%; }
-}
+
+/* LDAP suggestion z-index and spacing */
+.ldap-suggest { z-index:1200; max-width:420px; }
+
+/* tiny visual tweak to the resource placeholder text */
+input.user_ldap::-webkit-input-placeholder { color:#aab6c6; }
+input.user_ldap::placeholder { color:#aab6c6; }
 </style>
 
-<div class="alloc-card">
+<div class="alloc-card" role="main" aria-labelledby="monthlyAllocationsTitle">
   <div class="d-flex justify-content-between">
-    <h3 class="mb-0">Monthly Allocations</h3>
-    <div class="small-muted">Manage resources and FTE per IOM</div>
+    <div>
+      <h3 id="monthlyAllocationsTitle" class="mb-0">Monthly Allocations</h3>
+      <div class="sub">Manage resources and FTE per IOM</div>
+    </div>
   </div>
 
   <!-- Top controls -->
-  <div class="d-flex alloc-toprow mt-3 alloc-controls">
-    <div style="min-width:260px;">
+  <div class="alloc-toprow alloc-controls" role="region" aria-label="Filters">
+    <div class="control" style="min-width:260px;">
       <label for="projectSelect">Project</label>
-      <select id="projectSelect" class="form-select">
+      <select id="projectSelect" class="form-select" aria-label="Select project">
         {% for p in projects %}
           <option value="{{ p.id }}" {% if p.id == project_id %}selected{% endif %}>{{ p.name }}</option>
         {% endfor %}
@@ -48,14 +55,14 @@
       </select>
     </div>
 
-    <div style="width:130px;">
+    <div class="control" style="width:130px;">
       <label for="yearInput">Year</label>
-      <input id="yearInput" type="number" class="form-control" value="{{ now.year }}">
+      <input id="yearInput" type="number" class="form-control" value="{{ now.year }}" aria-label="Year">
     </div>
 
-    <div style="width:180px;">
+    <div class="control" style="width:160px;">
       <label for="monthSelect">Month</label>
-      <select id="monthSelect" class="form-select">
+      <select id="monthSelect" class="form-select" aria-label="Month select">
         <option value="1" {% if now.month == 1 %}selected{% endif %}>January</option>
         <option value="2" {% if now.month == 2 %}selected{% endif %}>February</option>
         <option value="3" {% if now.month == 3 %}selected{% endif %}>March</option>
@@ -72,45 +79,43 @@
     </div>
 
     <div style="display:flex; gap:8px; align-items:flex-end;">
-      <button id="loadIomsBtn" class="btn btn-primary btn-compact">Load IOMs</button>
+      <button id="loadIomsBtn" class="btn btn-primary btn-compact" aria-label="Load IOMs">Load IOMs</button>
     </div>
   </div>
 
   <!-- IOM select + search -->
-  <div class="row mt-3 g-2">
+  <div class="row mt-3 g-2" role="region" aria-label="IOM selection">
     <div class="col-md-7">
       <label class="form-label">Applicable IOMs</label>
-      <div class="d-flex">
-        <select id="iomsDropdown" class="form-select me-2">
+      <div class="form-inline">
+        <select id="iomsDropdown" class="form-select" aria-label="Applicable IOMs">
           <option value="">-- Load IOMs then select --</option>
         </select>
-        <button id="addIomBtn" class="btn btn-outline-secondary btn-compact">Add Selected IOM</button>
+        <button id="addIomBtn" class="btn btn-outline btn-compact" aria-label="Add selected IOM">Add Selected IOM</button>
       </div>
     </div>
     <div class="col-md-5">
       <label class="form-label">Search IOM / Dept</label>
-      <input id="searchIom" class="form-control" placeholder="iom id or department">
+      <input id="searchIom" class="form-control" placeholder="iom id or department" aria-label="Search IOM">
     </div>
   </div>
 
-  <!-- IOM detail card -->
-  <div id="iomDetailCard" class="card p-3 mt-3" style="display:none; border:1px solid #eef2f7;">
-    <div class="d-flex justify-content-between">
-      <div>
-        <div><strong id="iomTitle">IOM:</strong></div>
-        <div class="small-muted" id="iomDept"></div>
-      </div>
-      <div style="text-align:right;">
-        <div class="small-muted">Month FTE: <strong id="iomMonthFte">0.00</strong></div>
-        <div class="small-muted">Month Hrs: <strong id="iomMonthHrs">0.00</strong></div>
-        <div class="small-muted">Remaining FTE: <strong id="iomRemFte">0.00</strong></div>
-        <div class="small-muted">Remaining Hrs: <strong id="iomRemHrs">0.00</strong></div>
-      </div>
+  <!-- IOM detail card: left = title, right = inline stats -->
+  <div id="iomDetailCard" class="card p-3 mt-3" role="region" aria-live="polite" style="display:none; border:1px solid #eef2f7;">
+    <div class="iom-left">
+      <div style="font-weight:700; font-size:1.05rem;" id="iomTitle">IOM: </div>
+      <div class="small-muted" id="iomDept">—</div>
+    </div>
+    <div class="iom-right">
+      <span class="stat">Month FTE:<strong id="iomMonthFte">0.0000</strong></span>
+      <span class="stat">Month Hrs:<strong id="iomMonthHrs">0.00</strong></span>
+      <span class="stat">Remaining FTE:<strong id="iomRemFte">0.0000</strong></span>
+      <span class="stat">Remaining Hrs:<strong id="iomRemHrs">0.00</strong></span>
     </div>
   </div>
 
   <!-- Allocation table -->
-  <div class="table-responsive mt-3">
+  <div class="table-responsive mt-3" role="region" aria-label="Allocations table">
     <table class="table table-striped table-hover align-middle" id="allocTable">
       <thead class="table-light">
         <tr>
@@ -120,7 +125,7 @@
           <th>WBS (Seller)</th>
           <th style="width:120px;">Total Hrs</th>
           <th style="min-width:240px;">Resource (LDAP) <div class="small-muted">type 3+ chars to search</div></th>
-          <th style="width:80px;">Remove</th>
+          <th style="width:110px;">Remove</th>
         </tr>
       </thead>
       <tbody id="allocBody">
@@ -130,20 +135,19 @@
   </div>
 
   <div class="d-flex gap-2 mt-2">
-    <button id="addResourceBtn" class="btn btn-outline-primary btn-compact">Add Resource</button>
-    <button id="saveBtn" class="btn btn-success btn-compact">Save</button>
+    <button id="addResourceBtn" class="btn btn-outline btn-compact" aria-label="Add resource">Add Resource</button>
+    <button id="saveBtn" class="btn btn-primary btn-compact" aria-label="Save allocations">Save</button>
   </div>
 
   <div style="display:none">{% csrf_token %}<input id="csrfTokenValue" /></div>
 </div>
 
 <script>
-/* Simplified JS: improved UX, no weekly percent columns, cleaner interactions.
-   The template relies on endpoints already provided:
-   - get_applicable_ioms (GET)
-   - get_iom_details (GET)
-   - allocations_ldap_search (GET?q=)
-   - save_monthly_allocations (POST)
+/*
+  Updated JS:
+  - LDAP fetch URL logged to console for debugging
+  - addIomRow includes classes 'resource-td' and 'remove-td'
+  - autocomplete attach is robust and logs network / results
 */
 (function(){
   const csrftoken = (function(){
@@ -169,6 +173,8 @@
   const addResourceBtn = document.getElementById('addResourceBtn');
   const saveBtn = document.getElementById('saveBtn');
 
+  const ldapEndpoint = '{% url "projects:allocations_ldap_search" %}'; // debug-friendly
+
   function clearTableEmptyState() {
     const row = allocBody.querySelector('.empty-state');
     if (row) row.remove();
@@ -179,12 +185,9 @@
     const year = yearInput.value;
     const month = monthSelect.value;
     const search = searchIom.value.trim();
-
     if (!project_id) { alert('Select a project'); return; }
-
     const params = new URLSearchParams({ project_id, year, month });
     if (search) params.set('search', search);
-
     try {
       const resp = await fetch('{% url "projects:get_applicable_ioms" %}?' + params.toString(), { credentials:'same-origin' });
       if (!resp.ok) throw new Error('Failed to load');
@@ -198,8 +201,8 @@
         iomsDropdown.appendChild(opt);
       });
     } catch (err) {
-      console.error(err);
-      alert('Could not load IOMs');
+      console.error("Load IOMs error:", err);
+      alert('Could not load IOMs (see console)');
     }
   });
 
@@ -222,9 +225,9 @@
     iomDept.innerText = iom.department || '';
     iomMonthFte.innerText = (parseFloat(iom.month_fte||0)).toFixed(4);
     iomMonthHrs.innerText = (parseFloat(iom.month_hours||0)).toFixed(2);
-    iomRemFte.innerText = '-';
-    iomRemHrs.innerText = '-';
-    iomDetailCard.style.display = 'block';
+    iomRemFte.innerText = (parseFloat(iom.remaining_fte||0)).toFixed(4);
+    iomRemHrs.innerText = (parseFloat(iom.remaining_hours||0)).toFixed(2);
+    iomDetailCard.style.display = 'flex';
   }
 
   async function fetchIomDetails(iom_row_id) {
@@ -237,12 +240,7 @@
       const data = await resp.json();
       if (!data.ok) return;
       const iom = data.iom;
-      iomTitle.innerText = 'IOM: ' + iom.iom_id;
-      iomDept.innerText = iom.department || '-';
-      iomMonthFte.innerText = parseFloat(iom.month_fte||0).toFixed(4);
-      iomMonthHrs.innerText = parseFloat(iom.month_hours||0).toFixed(2);
-      iomRemFte.innerText = parseFloat(iom.remaining_fte||0).toFixed(4);
-      iomRemHrs.innerText = parseFloat(iom.remaining_hours||0).toFixed(2);
+      showIomPreview(iom);
     } catch (err) {
       console.warn('iom details', err);
     }
@@ -251,67 +249,87 @@
   function addIomRow(iom) {
     // avoid duplicate iom row
     if ([...allocBody.children].some(tr => tr.dataset.iomId == iom.iom_id)) { alert('IOM already added'); return; }
+
     const html = `
       <tr data-iom-id="${iom.iom_id}">
-        <td><input class="form-control dept" value="${(iom.department||'').replace(/"/g,'&quot;')}"></td>
-        <td><input class="form-control iom_id" value="${iom.iom_id}" readonly></td>
-        <td><input class="form-control wbs_buyer" value="${(iom.buyer_wbs_cc||'').replace(/"/g,'&quot;')}"></td>
-        <td><input class="form-control wbs_seller" value="${(iom.seller_wbs_cc||'').replace(/"/g,'&quot;')}"></td>
-        <td><input class="form-control total_hrs" type="number" value="${parseFloat(iom.month_hours||0).toFixed(2)}" min="0"></td>
-        <td style="position:relative;">
-          <input class="form-control user_ldap" placeholder="start typing (3+ chars)"/>
+        <td><input class="form-control dept" value="${(iom.department||'').replace(/"/g,'&quot;')}" /></td>
+        <td><input class="form-control iom_id" value="${iom.iom_id}" readonly /></td>
+        <td><input class="form-control wbs_buyer" value="${(iom.buyer_wbs_cc||'').replace(/"/g,'&quot;')}" /></td>
+        <td><input class="form-control wbs_seller" value="${(iom.seller_wbs_cc||'').replace(/"/g,'&quot;')}" /></td>
+        <td><input class="form-control total_hrs" type="number" value="${parseFloat(iom.month_hours||0).toFixed(2)}" min="0" /></td>
+
+        <!-- resource and its suggestion box (resource-td) -->
+        <td class="resource-td">
+          <input class="form-control user_ldap" placeholder="start typing (3+ chars)" aria-label="user ldap"/>
           <div class="ldap-suggest" style="display:none;"></div>
         </td>
-        <td><button class="btn btn-sm btn-danger removeBtn btn-compact">Remove</button></td>
+
+        <!-- remove placed in its own column, will be visually below resource due to CSS -->
+        <td class="remove-td">
+          <button class="btn btn-sm btn-danger removeBtn btn-compact" aria-label="Remove resource">Remove</button>
+        </td>
       </tr>
     `;
     const tr = document.createElement('tr');
     tr.innerHTML = html;
-    // replace placeholder row if present
     const empty = allocBody.querySelector('.empty-state');
     if (empty) empty.remove();
     allocBody.appendChild(tr);
     tr.dataset.iomId = iom.iom_id;
 
     // attach remove
-    tr.querySelector('.removeBtn').addEventListener('click', () => tr.remove());
+    const removeBtn = tr.querySelector('.removeBtn');
+    removeBtn.addEventListener('click', () => tr.remove());
 
-    // LDAP autocomplete
+    // LDAP autocomplete - attach to the new input
     const ldapInput = tr.querySelector('.user_ldap');
     const suggestBox = tr.querySelector('.ldap-suggest');
     let timer = null;
+
     ldapInput.addEventListener('input', () => {
       const q = ldapInput.value.trim();
       suggestBox.innerHTML = '';
       suggestBox.style.display = 'none';
       if (timer) clearTimeout(timer);
-      if (q.length < 3) return;
+      if (q.length < 3) return; // client-enforced minimum
+
       timer = setTimeout(async () => {
         try {
-          const resp = await fetch('{% url "projects:allocations_ldap_search" %}?q=' + encodeURIComponent(q), { credentials:'same-origin' });
-          if (!resp.ok) return;
+          const url = ldapEndpoint + '?q=' + encodeURIComponent(q);
+          console.log('LDAP query:', url);
+          const resp = await fetch(url, { credentials: 'same-origin' });
+          if (!resp.ok) {
+            console.warn('LDAP request failed', resp.status);
+            return;
+          }
           const data = await resp.json();
-          if (!data.ok) return;
+          if (!data || !Array.isArray(data.results)) {
+            console.warn('LDAP unexpected response', data);
+            return;
+          }
+          // show results
           data.results.forEach(r => {
             const a = document.createElement('a');
             a.href = '#';
             a.className = 'list-group-item list-group-item-action';
-            a.textContent = (r.mail || r.username || r.cn);
-            a.dataset.mail = r.mail || r.username;
+            // display-friendly: prefer "cn (mail)" or username
+            a.textContent = (r.cn || r.sAMAccountName) + (r.mail ? ' <' + r.mail + '>' : '');
+            a.dataset.mail = r.mail || r.sAMAccountName || '';
             a.onclick = (e) => { e.preventDefault(); ldapInput.value = a.dataset.mail; suggestBox.style.display='none'; };
             suggestBox.appendChild(a);
           });
           if (suggestBox.children.length) suggestBox.style.display = 'block';
-        } catch (err) { console.warn(err); }
-      }, 250);
+        } catch (err) {
+          console.error('LDAP fetch error', err);
+        }
+      }, 220);
     });
 
-    // click outside hides suggest
+    // hide suggestion box when click outside
     document.addEventListener('click', (ev) => { if (!tr.contains(ev.target)) suggestBox.style.display='none'; });
   }
 
   addResourceBtn.addEventListener('click', () => {
-    // add an empty row
     addIomRow({ iom_id:'', department:'', buyer_wbs_cc:'', seller_wbs_cc:'', month_hours:0 });
   });
 
@@ -327,15 +345,9 @@
 
     const items = [];
     for (const r of rows) {
-      // skip empty-state rows
       if (r.classList.contains('empty-state')) continue;
       const user_ldap = (r.querySelector('.user_ldap') || {}).value || '';
-      const iom_id = (r.querySelector('.iom_id') || {}).value || '';
-      const dept = (r.querySelector('.dept') || {}).value || '';
-      const wbs_b = (r.querySelector('.wbs_buyer') || {}).value || '';
-      const wbs_s = (r.querySelector('.wbs_seller') || {}).value || '';
       const total_hours = Math.round(parseFloat((r.querySelector('.total_hrs') || {}).value || 0));
-      // coe_id/domain_id left as 0/default; adjust if you collect these
       items.push({ coe_id: 0, domain_id: 0, user_ldap: user_ldap, total_hours: total_hours });
     }
 
