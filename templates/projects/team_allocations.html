@@ -4,6 +4,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<link rel="stylesheet" href="{% static 'projects/css/team_allocations.css' %}">
 <style>
 .container { max-width:1200px; margin:18px auto; }
 .resource-block { background:#fff; border-radius:10px; padding:14px; margin-bottom:18px; box-shadow:0 6px 18px rgba(2,6,23,0.04); }
@@ -38,10 +39,10 @@
     <form method="get" style="display:flex;gap:8px;align-items:center;">
       {# HTML5 month input produces YYYY-MM, aligns with server parsing #}
       <div class="control-item">
-        <label class="small-muted" style="margin-right:6px;">Select month</label>
-        <input type="month" name="month" value="{{ month_start|date:'Y-m' }}" style="padding:8px;border-radius:8px;border:1px solid #e6eaf0;">
+        <label class="ctrl-label" style="margin-right:6px;">Select month</label>
+        <input type="month" class="input-month" name="month" value="{{ month_start|date:'Y-m' }}" style="padding:8px;border-radius:8px;border:1px solid #e6eaf0;">
       </div>
-      <button class="btn btn-reset" type="submit">Load</button>
+      <button class="btn-load" type="submit">Load</button>
     </form>
   </div>
 
@@ -87,19 +88,19 @@
 
                 {# weekly_map stores 'percent' per week in the view; show percent here #}
                 <td><input class="week-input" type="number" min="0" max="100" step="0.01"
-                             value="{{ w|dict_get:1|dict_get:'percent'|default:0 }}"
+                             value="{{ w|dict_get:1|dict_get:'percent'|default:0|floatformat:2 }}"
                              data-week="1"></td>
 
                 <td><input class="week-input" type="number" min="0" max="100" step="0.01"
-                             value="{{ w|dict_get:2|dict_get:'percent'|default:0 }}"
+                             value="{{ w|dict_get:2|dict_get:'percent'|default:0|floatformat:2 }}"
                              data-week="2"></td>
 
                 <td><input class="week-input" type="number" min="0" max="100" step="0.01"
-                             value="{{ w|dict_get:3|dict_get:'percent'|default:0 }}"
+                             value="{{ w|dict_get:3|dict_get:'percent'|default:0|floatformat:2 }}"
                              data-week="3"></td>
 
                 <td><input class="week-input" type="number" min="0" max="100" step="0.01"
-                             value="{{ w|dict_get:4|dict_get:'percent'|default:0 }}"
+                             value="{{ w|dict_get:4|dict_get:'percent'|default:0|floatformat:2 }}"
                              data-week="4"></td>
 
                 <td class="actions">

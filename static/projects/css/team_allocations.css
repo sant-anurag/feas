@@ -1,0 +1,308 @@
+/* General container spacing */
+.container {
+    max-width: 1200px;
+    margin: 20px auto;
+}
+
+/* Load button */
+.btn-load {
+    background: linear-gradient(90deg, #2563eb, #1e40af);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s ease-in-out;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+}
+
+.btn-load:hover {
+    background: linear-gradient(90deg, #1e40af, #1e3a8a);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgba(30, 64, 175, 0.3);
+}
+
+/* Calendar input */
+.input-month {
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 14px;
+    background: #fff;
+    transition: border 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.input-month:focus {
+    outline: none;
+    border: 1px solid #2563eb;
+    box-shadow: 0 0 6px rgba(37, 99, 235, 0.3);
+}
+
+/* Reportee section card */
+.resource-block {
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 16px;
+    padding: 18px;
+    margin-bottom: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    transition: all 0.3s ease-in-out;
+    background-image: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(59, 130, 246, 0.15));
+}
+
+.resource-block:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15);
+    background-image: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(59, 130, 246, 0.25));
+}
+
+/* Reportee header styling */
+.resource-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.resource-title {
+    font-weight: 700;
+    font-size: 16px;
+    color: #111827;
+}
+
+/* Table styling inside card */
+.team-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.team-table th, .team-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+    font-size: 14px;
+}
+
+.team-table thead th {
+    background: rgba(243, 244, 246, 0.5);
+    font-weight: 600;
+    color: #374151;
+}
+
+/* Input fields inside table */
+.week-input {
+    width: 80px;
+    padding: 6px;
+    border-radius: 6px;
+    border: 1px solid #d1d5db;
+    font-size: 13px;
+    transition: all 0.2s ease-in-out;
+}
+
+.week-input:focus {
+    border: 1px solid #2563eb;
+    box-shadow: 0 0 5px rgba(37, 99, 235, 0.3);
+    outline: none;
+}
+
+/* Save / Reset buttons */
+.btn-save {
+    background: linear-gradient(90deg, #059669, #047857);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s ease-in-out;
+}
+
+.btn-save:hover {
+    background: linear-gradient(90deg, #047857, #065f46);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(4, 120, 87, 0.25);
+}
+
+.btn-reset {
+    background: #fff;
+    border: 1px solid #d1d5db;
+    color: #374151;
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s ease-in-out;
+}
+
+.btn-reset:hover {
+    background: #f9fafb;
+    transform: translateY(-1px);
+}
+
+/* ---------------------------
+   Page header controls block
+   --------------------------- */
+.page-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+/* container that holds the month input + load button */
+.page-controls .control-card {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(250,250,255,0.85));
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.04);
+  box-shadow: 0 6px 18px rgba(12, 36, 75, 0.06);
+  backdrop-filter: blur(6px);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.page-controls .control-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 26px rgba(12, 36, 75, 0.10);
+}
+
+/* label */
+.control-card .ctrl-label {
+  color: #374151;
+  font-size: 13px;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+/* month input (calendar) */
+.input-month {
+  min-width: 150px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(203,213,225,0.8);
+  background: linear-gradient(180deg,#ffffff,#fbfdff);
+  box-shadow: inset 0 -1px 0 rgba(255,255,255,0.6);
+  font-size: 14px;
+}
+
+/* compact calendar icon styling if using an icon wrapper */
+.input-month + .cal-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(203,213,225,0.9);
+  background: #fff;
+  box-shadow: 0 3px 8px rgba(14,30,80,0.04);
+}
+
+/* LOAD button (refined gradient, larger) */
+.btn-load {
+  background: linear-gradient(90deg, #1e3a8a 0%, #2563eb 60%);
+  color: #fff;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  box-shadow: 0 8px 20px rgba(37,99,235,0.18);
+  border: none;
+  transition: transform .16s ease, box-shadow .16s ease, opacity .12s ease;
+}
+.btn-load:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(37,99,235,0.22);
+  opacity: 0.98;
+}
+.btn-load:active { transform: translateY(-1px); }
+
+/* small helper: when controls are on narrow screens stack them */
+@media (max-width: 880px) {
+  .page-controls { justify-content: flex-start; flex-wrap: wrap; }
+  .page-controls .control-card { width:100%; justify-content: space-between; }
+}
+
+/* ---------------------------
+   Reportee card (highlighted)
+   --------------------------- */
+
+/* stronger accent when you want a highlighted variant (e.g. first or searched result) */
+.resource-block.highlight {
+  position: relative;
+  overflow: visible;
+  border-radius: 16px;
+  padding: 20px;
+  /* stronger multicolor glass gradient */
+  background-image: linear-gradient(135deg, rgba(96,165,250,0.13), rgba(139,92,246,0.08));
+  border: 1px solid rgba(96,165,250,0.12);
+  box-shadow: 0 18px 40px rgba(14,35,77,0.12), inset 0 1px 0 rgba(255,255,255,0.35);
+  transition: transform 0.28s cubic-bezier(.2,.9,.2,1), box-shadow 0.28s ease, background-position 0.6s ease;
+}
+
+/* left accent bar */
+.resource-block.highlight::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #60a5fa, #7c3aed);
+  box-shadow: 0 6px 18px rgba(124,58,237,0.12);
+  transform-origin: left center;
+}
+
+/* subtle glow on hover (keeps consistency with .resource-block hover) */
+.resource-block.highlight:hover {
+  transform: translateY(-6px) scale(1.005);
+  box-shadow: 0 26px 60px rgba(14,35,77,0.18);
+}
+
+/* title accent inside highlight */
+.resource-block.highlight .resource-title {
+  background: linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.0));
+  padding-bottom: 6px;
+  display:inline-block;
+  position:relative;
+}
+
+/* tiny gradient underline */
+.resource-block.highlight .resource-title::after {
+  content: "";
+  display:block;
+  height:4px;
+  width:60%;
+  margin-top:8px;
+  border-radius:4px;
+  background: linear-gradient(90deg, rgba(96,165,250,0.9), rgba(124,58,237,0.9));
+  opacity: 0.85;
+}
+
+/* a floating action badge on hover (optional) */
+.resource-block .action-badge {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  background: linear-gradient(90deg,#06b6d4,#3b82f6);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-weight:700;
+  box-shadow: 0 8px 20px rgba(59,130,246,0.16);
+  display: none;
+}
+.resource-block.highlight:hover .action-badge { display:inline-block; }
+
+/* responsive: keep card spacing on mobile */
+@media (max-width: 720px) {
+  .resource-block.highlight::before { left:-6px; top:10px; bottom:10px; width:5px; }
+  .resource-block.highlight .resource-title::after { width:40%; }
+}

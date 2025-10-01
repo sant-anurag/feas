@@ -1273,21 +1273,20 @@ def team_allocations(request):
     # --- fetch allocation rows for these reportees for the selected month -----------
     rows = []
     if reportees_ldaps:
+        # use monthly_allocation_entries as canonical allocation source
         in_clause, in_params = _sql_in_clause(reportees_ldaps)
         sql = f"""
-            SELECT mae.id AS allocation_id,
-                   mae.project_id,
+            SELECT mae.id AS item_id,
+                   mae.id AS allocation_id,
+                   mae.user_ldap,
+                   u.username, u.email,
                    p.name AS project_name,
-                   mae.iom_id AS iom_id,
                    pw.department AS domain_name,
-                   COALESCE(mae.user_ldap, '') AS user_ldap,
-                   u.username AS username,
-                   u.email AS email,
                    COALESCE(mae.total_hours, 0.00) AS total_hours
             FROM monthly_allocation_entries mae
+            LEFT JOIN users u ON u.email = mae.user_ldap
             LEFT JOIN projects p ON mae.project_id = p.id
             LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
-            LEFT JOIN users u ON u.email = mae.user_ldap
             WHERE mae.month_start = %s
               AND mae.user_ldap IN {in_clause}
             ORDER BY u.username, p.name
@@ -1301,12 +1300,10 @@ def team_allocations(request):
         except Exception as exc:
             logger.exception("team_allocations: DB query failed: %s", exc)
             rows = []
-
     else:
         print("team_allocations: no reportees to fetch for %s", session_ldap)
 
     # --- merge/deduplicate (if needed) -------------------------------------------
-    # If rows may contain duplicates based on your data model, dedupe by item_id
     dedup = {}
     for r in rows:
         key = r.get("item_id") or (r.get("allocation_id"), r.get("user_ldap"), r.get("project_name"))
@@ -1314,43 +1311,52 @@ def team_allocations(request):
             dedup[key] = r
     all_rows = list(dedup.values())
 
-    # --- fetch weekly allocations for all allocation_ids --------------------------------
+    # --- fetch weekly allocations for all allocation_ids --------------------------
     allocation_ids = list({r["allocation_id"] for r in all_rows if r.get("allocation_id")})
     weekly_map = {}
     if allocation_ids:
         in_clause, in_params = _sql_in_clause(allocation_ids)
         sql = f"""
-            SELECT allocation_id, week_number, hours, status
+            SELECT allocation_id, week_number, percent, hours, status
             FROM weekly_allocations
             WHERE allocation_id IN {in_clause}
         """
         try:
             with connection.cursor() as cur:
                 cur.execute(sql, in_params)
-                print("team_allocations: fetched weekly allocations for %d allocation_ids", len(allocation_ids))
                 for r in dictfetchall(cur) or []:
                     try:
                         alloc = r.get("allocation_id")
                         wk = int(r.get("week_number") or 0)
-                        hours = int(r.get("hours") or 0)
+                        # keep percent as float and hours as string/float with 2 decimals
+                        pct = float(r.get("percent") or 0.0)
+                        hrs_raw = r.get("hours") or 0.0
+                        # convert hours to float preserving decimals
+                        try:
+                            hrs = float(hrs_raw)
+                        except Exception:
+                            hrs = 0.0
                         status = r.get("status") or ""
                         if alloc is None or wk <= 0:
                             continue
-                        weekly_map.setdefault(alloc, {})[wk] = {"hours": hours, "status": status}
+                        weekly_map.setdefault(alloc, {})[wk] = {"percent": pct, "hours": hrs, "status": status}
                     except Exception:
                         logger.exception("team_allocations: bad weekly row %r", r)
         except Exception as exc:
             logger.exception("team_allocations: weekly allocations query failed: %s", exc)
             weekly_map = {}
+
     print("team_allocations: weekly_map keys:", list(weekly_map.keys()))
-    # --- attach weekly attrs and compute display_name --------------------------------
+
+    # --- attach weekly attrs and compute display_name ----------------------------
     for r in all_rows:
         aid = r.get("allocation_id")
         wk = weekly_map.get(aid, {})
-        r["w1"] = wk.get(1, {}).get("hours", 0)
-        r["w2"] = wk.get(2, {}).get("hours", 0)
-        r["w3"] = wk.get(3, {}).get("hours", 0)
-        r["w4"] = wk.get(4, {}).get("hours", 0)
+        # For UI we want percent in the inputs (so managers edit percentages)
+        r["w1"] = wk.get(1, {}).get("percent", 0)
+        r["w2"] = wk.get(2, {}).get("percent", 0)
+        r["w3"] = wk.get(3, {}).get("percent", 0)
+        r["w4"] = wk.get(4, {}).get("percent", 0)
         r["s1"] = wk.get(1, {}).get("status", "")
         r["s2"] = wk.get(2, {}).get("status", "")
         r["s3"] = wk.get(3, {}).get("status", "")
