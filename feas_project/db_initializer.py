@@ -426,7 +426,18 @@ class DatabaseInitializer:
               DEFAULT CHARSET=utf8mb4
               COLLATE=utf8mb4_0900_ai_ci;
         """)
-
+        print("Prepping holidays table")
+        ddl.append("""
+        CREATE TABLE IF NOT EXISTS `holidays` (
+          `id` BIGINT NOT NULL AUTO_INCREMENT,
+          `holiday_date` DATE NOT NULL,
+          `name` VARCHAR(255) NOT NULL,
+          `created_by` VARCHAR(255) DEFAULT NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (`id`),
+          UNIQUE KEY `uq_holiday_date` (`holiday_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        """)
         print(f"Total tables to create: {len(ddls)}")
         return tuple(ddls)
 

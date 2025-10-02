@@ -49,4 +49,6 @@ urlpatterns = [
     path('my-allocations/', views.my_allocations, name='my_allocations'),
     path('my-allocations/save-weekly/', views.save_my_alloc_weekly, name='save_my_alloc_weekly'),
     path('my-allocations/save-daily/', views.save_my_alloc_daily, name='save_my_alloc_daily'),
+    path('my-allocations/export/excel/', views.export_my_punches_excel, name='export_my_punches_excel'),
+    path('my-allocations/export/pdf/', views.export_my_punches_pdf, name='export_my_punches_pdf'),
 ]

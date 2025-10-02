@@ -71,6 +71,19 @@ HOURS_AVAILABLE_PER_MONTH = float(getattr(settings, "HOURS_AVAILABLE_PER_MONTH",
 # -------------------------
 # DB helpers
 # -------------------------
+
+def get_wbs_options_for_iom(iom_id):
+    with connection.cursor() as cur:
+        cur.execute("SELECT seller_wbs_cc, buyer_wbs_cc FROM prism_wbs WHERE iom_id=%s LIMIT 1", [iom_id])
+        row = cur.fetchone()
+    if not row:
+        return []
+    seller, buyer = row
+    opts = []
+    if seller: opts.append({"code": seller, "label": f"Seller WBS: {seller}"})
+    if buyer: opts.append({"code": buyer, "label": f"Buyer WBS: {buyer}"})
+    return opts
+
 def dictfetchall(cursor):
     """Return all rows from a cursor as a list of dicts."""
     cols = [c[0] for c in cursor.description] if cursor.description else []
@@ -1542,19 +1555,10 @@ def my_allocations(request):
       - daily_dates: list of dicts: { "date": date_obj, "week_number": 1..4,
                                      "is_weekend": bool, "iso": "YYYY-MM-DD" }
       - daily_map: { allocation_id: { 'YYYY-MM-DD': '0.00', ... }, ... }
-      - month_start: date for header
+      - holidays_map: { "YYYY-MM-DD": "Occasion" }
     """
-    # local imports to keep this function self-contained when pasted
     from datetime import timedelta, date as _date
     from decimal import Decimal
-
-    # fallback helper if not defined elsewhere in module
-    try:
-        month_day_to_week_number  # type: ignore
-    except NameError:
-        def month_day_to_week_number(d):
-            # days 1-7 -> 1, 8-14 -> 2, 15-21 -> 3, 22+ -> 4
-            return min(((d.day - 1) // 7) + 1, 4)
 
     session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or getattr(request.user, "email", None)
     if not session_ldap:
@@ -1584,17 +1588,16 @@ def my_allocations(request):
 
     allocation_ids = [r['allocation_id'] for r in alloc_rows] if alloc_rows else []
 
-    # Step 2: fetch weekly_allocations for these allocation_ids (gives allocated week hours)
-    weekly_alloc = {}  # { allocation_id: {week_number: {percent, hours}}}
+    # Step 2: fetch weekly_allocations for these allocation_ids
+    weekly_alloc = {}
     if allocation_ids:
         in_clause = ",".join(["%s"] * len(allocation_ids))
-        params = allocation_ids
         with connection.cursor() as cur:
             cur.execute(f"""
                 SELECT allocation_id, week_number, percent, hours
                 FROM weekly_allocations
                 WHERE allocation_id IN ({in_clause})
-            """, params)
+            """, allocation_ids)
             for r in dictfetchall(cur):
                 aid = r['allocation_id']
                 weekly_alloc.setdefault(aid, {})[int(r['week_number'])] = {
@@ -1602,12 +1605,10 @@ def my_allocations(request):
                     'hours': Decimal(str(r['hours'] or '0.00'))
                 }
 
-    # Step 3: fetch user punches (both weekly and daily) for these allocation_ids within month
-    user_punch_map_week = {}   # { allocation_id: {week_number: Decimal(total_hours)} }
-    user_punch_map_daily = {}  # { allocation_id: { 'YYYY-MM-DD': Decimal(hours) } }
+    # Step 3: fetch user punches for these allocations within month
+    user_punch_map_week, user_punch_map_daily = {}, {}
     if allocation_ids:
         in_clause = ",".join(["%s"] * len(allocation_ids))
-        # param order: session_ldap, allocation ids..., month_start, month_end
         params = [session_ldap] + allocation_ids + [month_start, month_end]
         with connection.cursor() as cur:
             cur.execute(f"""
@@ -1619,18 +1620,16 @@ def my_allocations(request):
             """, params)
             for r in dictfetchall(cur):
                 aid = r['allocation_id']
-                # weekly punches stored with week_number
                 if r.get('week_number') is not None:
                     wk = int(r['week_number'])
                     user_punch_map_week.setdefault(aid, {})
                     user_punch_map_week[aid][wk] = user_punch_map_week[aid].get(wk, Decimal('0.00')) + Decimal(str(r.get('actual_hours') or '0.00'))
-                # daily punches stored with punch_date
                 if r.get('punch_date'):
                     dstr = r['punch_date'].strftime("%Y-%m-%d")
                     user_punch_map_daily.setdefault(aid, {})
                     user_punch_map_daily[aid][dstr] = Decimal(str(r.get('actual_hours') or '0.00'))
 
-    # Step 4: build final rows that template consumes
+    # Step 4: build rows
     rows = []
     for r in alloc_rows:
         aid = r['allocation_id']
@@ -1639,9 +1638,9 @@ def my_allocations(request):
             'allocation_id': aid,
             'project_name': r.get('project_name') or '',
             'domain_name': r.get('domain_name') or '',
-            'total_hours': format(total_hours, '0.2f')
+            'total_hours': format(total_hours, '0.2f'),
+            'wbs_options': get_wbs_options_for_iom(r['iom_id']) if r.get('iom_id') else []
         }
-        # for each week 1..4 attach allocated and punched
         for wk in range(1, 5):
             alloc_w = weekly_alloc.get(aid, {}).get(wk, {}).get('hours', Decimal('0.00'))
             punched_w = user_punch_map_week.get(aid, {}).get(wk, Decimal('0.00'))
@@ -1649,7 +1648,7 @@ def my_allocations(request):
             row[f'w{wk}_punched_hours'] = format(punched_w, '0.2f')
         rows.append(row)
 
-    # Step 5: prepare daily grid (list of date dicts)
+    # Step 5: daily grid (dates of month)
     daily_dates = []
     cur_day = month_start
     while cur_day <= month_end:
@@ -1657,27 +1656,35 @@ def my_allocations(request):
         daily_dates.append({
             "date": cur_day,
             "week_number": wk,
-            "is_weekend": cur_day.weekday() >= 5,  # Saturday=5, Sunday=6
+            "is_weekend": cur_day.weekday() >= 5,
             "iso": cur_day.strftime("%Y-%m-%d"),
         })
-        cur_day = cur_day + timedelta(days=1)
+        cur_day += timedelta(days=1)
 
-    # Step 6: daily_map to be used by template: { allocation_id: { 'YYYY-MM-DD': '0.00', ... } }
+    # Step 6: daily_map
     daily_map = {}
     for r in alloc_rows:
         aid = r['allocation_id']
         daymap = {}
         for d in daily_dates:
-            s = d['iso']  # string "YYYY-MM-DD"
+            s = d['iso']
             daymap[s] = format(user_punch_map_daily.get(aid, {}).get(s, Decimal('0.00')), '0.2f')
         daily_map[aid] = daymap
+
+    # Step 7: holidays for this month
+    with connection.cursor() as cur:
+        cur.execute("SELECT holiday_date, name FROM holidays WHERE holiday_date BETWEEN %s AND %s", [month_start, month_end])
+        holiday_rows = dictfetchall(cur)
+    holidays_map = {r['holiday_date'].strftime("%Y-%m-%d"): r['name'] for r in holiday_rows}
 
     return render(request, "projects/my_allocations.html", {
         'rows': rows,
         'daily_dates': daily_dates,
         'daily_map': daily_map,
         'month_start': month_start,
+        'holidays_map': holidays_map,
     })
+
 
 
 
@@ -1685,9 +1692,8 @@ def my_allocations(request):
 @require_POST
 def save_my_alloc_weekly(request):
     """
-    POST JSON: { allocation_id: int, week_number: int, actual_hours: number }
-    Validates actual_hours <= weekly_allocated_hours
-    Upserts into user_punches (user_ldap, allocation_id, week_number)
+    POST JSON: { allocation_id, week_number, actual_hours, wbs }
+    Validates actual_hours <= weekly_allocated_hours, upserts user_punches.
     """
     session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or request.user.email
     if not session_ldap:
@@ -1698,53 +1704,46 @@ def save_my_alloc_weekly(request):
         allocation_id = int(payload.get('allocation_id', 0))
         week_number = int(payload.get('week_number', 0))
         actual_hours = Decimal(str(payload.get('actual_hours', '0'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        wbs = payload.get("wbs")
     except Exception:
         return JsonResponse({'ok': False, 'error': 'Invalid payload'}, status=400)
 
     if allocation_id <= 0 or week_number not in (1,2,3,4):
         return JsonResponse({'ok': False, 'error': 'Invalid allocation or week'}, status=400)
 
-    # fetch allocated hours for this allocation/week
+    # fetch allocated hours
     with connection.cursor() as cur:
-        cur.execute("""
-            SELECT hours
-            FROM weekly_allocations
-            WHERE allocation_id = %s AND week_number = %s
-            LIMIT 1
-        """, [allocation_id, week_number])
+        cur.execute("SELECT hours FROM weekly_allocations WHERE allocation_id=%s AND week_number=%s", [allocation_id, week_number])
         rec = cur.fetchone()
-
     if not rec:
-        return JsonResponse({'ok': False, 'error': 'No weekly allocation found for this week'}, status=400)
+        return JsonResponse({'ok': False, 'error': 'No weekly allocation found'}, status=400)
 
     alloc_hours = Decimal(str(rec[0] or '0.00'))
+    if actual_hours < 0 or actual_hours > alloc_hours:
+        return JsonResponse({'ok': False, 'error': f'Must be between 0 and {alloc_hours:.2f}'}, status=400)
 
-    # Validate: user cannot punch more than allocated hours for that week
-    if actual_hours < Decimal('0.00') or actual_hours > alloc_hours:
-        return JsonResponse({'ok': False, 'error': f'actual_hours must be between 0 and {format(alloc_hours, "0.2f")}'}, status=400)
-
-    # Upsert into user_punches keyed by (user_ldap, allocation_id, week_number)
+    # Upsert
     try:
         with transaction.atomic():
             with connection.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO user_punches (user_ldap, allocation_id, week_number, actual_hours, updated_at)
-                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    ON DUPLICATE KEY UPDATE actual_hours = VALUES(actual_hours), updated_at = CURRENT_TIMESTAMP
-                """, [session_ldap, allocation_id, week_number, str(actual_hours)])
+                    INSERT INTO user_punches (user_ldap, allocation_id, week_number, actual_hours, wbs, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE actual_hours=VALUES(actual_hours), wbs=VALUES(wbs), updated_at=CURRENT_TIMESTAMP
+                """, [session_ldap, allocation_id, week_number, str(actual_hours), wbs])
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)}, status=500)
 
-    return JsonResponse({'ok': True, 'allocation_id': allocation_id, 'week_number': week_number, 'actual_hours': format(actual_hours, '0.2f')})
+    return JsonResponse({'ok': True, 'allocation_id': allocation_id, 'week_number': week_number, 'actual_hours': f"{actual_hours:.2f}"})
+
 
 
 # ---------- save daily punches endpoint ----------
 @require_POST
 def save_my_alloc_daily(request):
     """
-    POST JSON: { allocation_id: int, punch_date: "YYYY-MM-DD", actual_hours: number }
-    Validates that total daily punches for the week (existing + new) do not exceed the week's allocated hours.
-    Upserts into user_punches by (user_ldap, allocation_id, punch_date).
+    POST JSON: { allocation_id, punch_date:"YYYY-MM-DD", actual_hours, wbs }
+    Ensures weekly totals <= allocation.
     """
     session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or request.user.email
     if not session_ldap:
@@ -1753,77 +1752,55 @@ def save_my_alloc_daily(request):
     try:
         payload = json.loads(request.body.decode('utf-8'))
         allocation_id = int(payload.get('allocation_id', 0))
-        punch_date_str = payload.get('punch_date')
+        punch_date = datetime.strptime(payload.get('punch_date'), "%Y-%m-%d").date()
         actual_hours = Decimal(str(payload.get('actual_hours', '0'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        punch_date = datetime.strptime(punch_date_str, "%Y-%m-%d").date()
+        wbs = payload.get("wbs")
     except Exception:
         return JsonResponse({'ok': False, 'error': 'Invalid payload'}, status=400)
 
-    if allocation_id <= 0:
-        return JsonResponse({'ok': False, 'error': 'Invalid allocation id'}, status=400)
-
-    # map date to week_number (1..4)
     week_number = month_day_to_week_number(punch_date)
 
-    # fetch weekly allocated hours
     with connection.cursor() as cur:
-        cur.execute("""
-            SELECT hours
-            FROM weekly_allocations
-            WHERE allocation_id = %s AND week_number = %s
-            LIMIT 1
-        """, [allocation_id, week_number])
+        cur.execute("SELECT hours FROM weekly_allocations WHERE allocation_id=%s AND week_number=%s", [allocation_id, week_number])
         rec = cur.fetchone()
     if not rec:
-        return JsonResponse({'ok': False, 'error': 'No weekly allocation found for this week'}, status=400)
+        return JsonResponse({'ok': False, 'error': 'No weekly allocation found'}, status=400)
+
     alloc_hours = Decimal(str(rec[0] or '0.00'))
 
-    # compute sum of existing daily punches for that week for this user+allocation (excluding current date row if exists)
-    # Determine week date range (week start / end) inside the month:
-    # Simple approach: find monday-sunday range containing punch_date OR use month-week buckets; we'll rely on days mapping used above:
-    # We'll compute week start as day 1+(week_number-1)*7 and end = min(month_end, week_start+6)
     month_start, month_end = get_month_start_and_end(punch_date.strftime("%Y-%m"))
-    wk_start_day = (week_number - 1) * 7 + 1
-    wk_start = month_start.replace(day=wk_start_day)
-    wk_end = wk_start + timedelta(days=6)
-    if wk_end > month_end:
-        wk_end = month_end
+    wk_start = month_start.replace(day=(week_number - 1) * 7 + 1)
+    wk_end = min(wk_start + timedelta(days=6), month_end)
 
     with connection.cursor() as cur:
-        cur.execute("""
-            SELECT COALESCE(SUM(actual_hours),0) FROM user_punches
-            WHERE user_ldap = %s AND allocation_id = %s AND punch_date BETWEEN %s AND %s
-        """, [session_ldap, allocation_id, wk_start, wk_end])
+        cur.execute("""SELECT COALESCE(SUM(actual_hours),0) FROM user_punches
+                       WHERE user_ldap=%s AND allocation_id=%s AND punch_date BETWEEN %s AND %s""",
+                    [session_ldap, allocation_id, wk_start, wk_end])
         sum_existing = Decimal(str(cur.fetchone()[0] or '0.00'))
 
-        # also subtract existing value for the same date (if any), because that will be replaced by the new value
-        cur.execute("""
-            SELECT actual_hours FROM user_punches
-            WHERE user_ldap = %s AND allocation_id = %s AND punch_date = %s
-            LIMIT 1
-        """, [session_ldap, allocation_id, punch_date])
+        cur.execute("""SELECT actual_hours FROM user_punches
+                       WHERE user_ldap=%s AND allocation_id=%s AND punch_date=%s""",
+                    [session_ldap, allocation_id, punch_date])
         existing_same = cur.fetchone()
-        existing_same_val = Decimal(str(existing_same[0])) if existing_same and existing_same[0] is not None else Decimal('0.00')
+        existing_same_val = Decimal(str(existing_same[0])) if existing_same else Decimal('0.00')
 
-    # total_after = sum_existing - existing_same_val + actual_hours
     total_after = (sum_existing - existing_same_val) + actual_hours
+    if total_after > alloc_hours:
+        return JsonResponse({'ok': False, 'error': f'Exceeds weekly allocation {alloc_hours:.2f}'}, status=400)
 
-    if total_after < Decimal('0.00') or total_after > alloc_hours:
-        return JsonResponse({'ok': False, 'error': f'Punch would exceed weekly allocation ({format(alloc_hours,"0.2f")}) — current week total after this would be {format(total_after,"0.2f")}'}, status=400)
-
-    # Upsert the daily punch
     try:
         with transaction.atomic():
             with connection.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO user_punches (user_ldap, allocation_id, punch_date, actual_hours, updated_at)
-                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    ON DUPLICATE KEY UPDATE actual_hours = VALUES(actual_hours), updated_at = CURRENT_TIMESTAMP
-                """, [session_ldap, allocation_id, punch_date, str(actual_hours)])
-    except Exception as exc:
-        return JsonResponse({'ok': False, 'error': str(exc)}, status=500)
+                    INSERT INTO user_punches (user_ldap, allocation_id, punch_date, week_number, actual_hours, wbs, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE actual_hours=VALUES(actual_hours), wbs=VALUES(wbs), updated_at=CURRENT_TIMESTAMP
+                """, [session_ldap, allocation_id, punch_date, week_number, str(actual_hours), wbs])
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)}, status=500)
 
-    return JsonResponse({'ok': True, 'allocation_id': allocation_id, 'punch_date': punch_date.strftime("%Y-%m-%d"), 'actual_hours': format(actual_hours, '0.2f')})
+    return JsonResponse({'ok': True, 'allocation_id': allocation_id, 'punch_date': punch_date.strftime("%Y-%m-%d"), 'actual_hours': f"{actual_hours:.2f}"})
+
 
 # my_allocations_update_status
 # -------------------------
@@ -2482,6 +2459,93 @@ def export_allocations(request):
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     wb.save(response)
     return response
+
+def export_my_punches_pdf(request):
+    session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or getattr(request.user,'email',None)
+    if not session_ldap:
+        return HttpResponseBadRequest("Not authenticated")
+
+    month_param = request.GET.get("month", _date.today().strftime("%Y-%m"))
+    month_start, month_end = get_month_start_and_end(month_param)
+
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT up.allocation_id, mae.project_id, p.name as project_name, mae.iom_id, pw.department,
+                   up.punch_date, up.week_number, up.actual_hours, up.wbs
+            FROM user_punches up
+            LEFT JOIN monthly_allocation_entries mae ON mae.id = up.allocation_id
+            LEFT JOIN projects p ON mae.project_id = p.id
+            LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
+            WHERE up.user_ldap = %s
+              AND up.punch_date BETWEEN %s AND %s
+            ORDER BY up.punch_date, p.name
+        """, [session_ldap, month_start, month_end])
+        rows = dictfetchall(cur)
+
+    html = render_to_string("projects/punches_pdf.html", {"rows": rows, "month": month_param, "user": session_ldap})
+    result = io.BytesIO()
+    pisa_status = pisa.CreatePDF(io.BytesIO(html.encode('utf-8')), dest=result)
+    if pisa_status.err:
+        return HttpResponse("Error generating PDF", status=500)
+    result.seek(0)
+    filename = f"punches_{session_ldap}_{month_param}.pdf"
+    response = HttpResponse(result.read(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+def export_my_punches_excel(request):
+    """Export the logged-in user's punches for selected month to Excel."""
+    session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or getattr(request.user,'email',None)
+    if not session_ldap:
+        return HttpResponseBadRequest("Not authenticated")
+
+    month_param = request.GET.get("month", _date.today().strftime("%Y-%m"))
+    month_start, month_end = get_month_start_and_end(month_param)
+
+    # fetch punches for user & month
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT up.allocation_id, mae.project_id, p.name as project_name, mae.iom_id, pw.department,
+                   up.punch_date, up.week_number, up.actual_hours, up.wbs
+            FROM user_punches up
+            LEFT JOIN monthly_allocation_entries mae ON mae.id = up.allocation_id
+            LEFT JOIN projects p ON mae.project_id = p.id
+            LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
+            WHERE up.user_ldap = %s
+              AND up.punch_date BETWEEN %s AND %s
+            ORDER BY up.punch_date, p.name
+        """, [session_ldap, month_start, month_end])
+        rows = dictfetchall(cur)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Punches {month_param}"
+
+    headers = ["Date", "Project", "IOM", "Dept", "Week#", "Hours", "WBS"]
+    for i,h in enumerate(headers, start=1):
+        ws.cell(row=1, column=i, value=h)
+        ws.column_dimensions[get_column_letter(i)].width = 20
+
+    r = 2
+    for rec in rows:
+        ws.cell(row=r, column=1, value=rec['punch_date'].strftime("%Y-%m-%d") if rec['punch_date'] else '')
+        ws.cell(row=r, column=2, value=rec['project_name'])
+        ws.cell(row=r, column=3, value=rec['iom_id'])
+        ws.cell(row=r, column=4, value=rec['department'])
+        ws.cell(row=r, column=5, value=rec['week_number'])
+        ws.cell(row=r, column=6, value=float(rec['actual_hours'] or 0))
+        ws.cell(row=r, column=7, value=rec['wbs'] or '')
+        r += 1
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"punches_{session_ldap}_{month_param}.xlsx"
+    response = HttpResponse(output.read(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
 
 
 

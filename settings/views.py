@@ -722,3 +722,33 @@ def get_monthly_max(request):
     print(f"[get_monthly_max] max_hours: {max_hours}")
 
     return JsonResponse({"ok": True, "max_hours": max_hours})
+
+from django.shortcuts import render, redirect
+from django.http import HttpResponseBadRequest
+from django.urls import reverse
+from django.db import connection
+
+def dictfetchall(cursor):
+    """Return all rows from a cursor as a list of dicts."""
+    cols = [c[0] for c in cursor.description] if cursor.description else []
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+def holidays_list(request):
+    """List holidays and provide form to add new one."""
+    with connection.cursor() as cur:
+        cur.execute("SELECT id, holiday_date, name FROM holidays ORDER BY holiday_date")
+        holidays = dictfetchall(cur)
+    return render(request, "settings/holidays.html", {"holidays": holidays})
+
+def holidays_add(request):
+    """Add a holiday (POST)."""
+    if request.method != "POST":
+        return HttpResponseBadRequest("POST required")
+    d = request.POST.get("holiday_date")
+    name = request.POST.get("name", "").strip()
+    if not d or not name:
+        return HttpResponseBadRequest("Date & Name required")
+    with connection.cursor() as cur:
+        cur.execute("INSERT INTO holidays (holiday_date, name, created_by) VALUES (%s,%s,%s)",
+                    [d, name, request.user.email if request.user.is_authenticated else None])
+    return redirect(reverse("settings:settings_holidays"))

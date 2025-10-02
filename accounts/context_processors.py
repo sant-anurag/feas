@@ -80,6 +80,7 @@ MENU_TREE = [
         "submenus": [
             {"key": "import_master", "title": "Import Master", "url": reverse_lazy("settings:import_master"), "roles": ["ADMIN","PDL"]},
             {"key": "monthly_hours", "title": "Monthly hours limit", "url": reverse_lazy("settings:monthly_hours_settings"), "roles": ["PDL","ADMIN"]},
+            {"key": "holidays", "title": "Annual Holidays", "url": reverse_lazy("settings:settings_holidays"), "roles": ["PDL","ADMIN"]},
             {"key": "ldap", "title": "LDAP Configuration", "url": "#", "roles": ["ADMIN","PDL"]},
             {"key": "system", "title": "System Config", "url": "#", "roles": ["ADMIN","PDL"]},
         ],

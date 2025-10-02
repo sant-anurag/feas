@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+  <div class="panel">
+    <h2>Organization Holidays</h2>
+    <form method="post" action="{% url 'settings:settings_holidays_add' %}" style="margin-bottom:16px;">
+      {% csrf_token %}
+      <label>Date:</label>
+      <input type="date" name="holiday_date" required>
+      <label>Name:</label>
+      <input type="text" name="name" required>
+      <button type="submit" class="btn btn-primary">Add Holiday</button>
+    </form>
+
+    <table class="table">
+      <thead><tr><th>Date</th><th>Occasion</th></tr></thead>
+      <tbody>
+        {% for h in holidays %}
+          <tr><td>{{ h.holiday_date }}</td><td>{{ h.name }}</td></tr>
+        {% empty %}
+          <tr><td colspan="2">No holidays defined.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

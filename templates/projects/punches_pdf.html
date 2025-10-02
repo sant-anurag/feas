@@ -1,0 +1,27 @@
+
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Punches Report</title></head>
+<body>
+<h2>Punches Report – {{ month }}</h2>
+<p>User: {{ user }}</p>
+<table border="1" cellspacing="0" cellpadding="4">
+  <thead>
+    <tr><th>Date</th><th>Project</th><th>IOM</th><th>Dept</th><th>Week</th><th>Hours</th><th>WBS</th></tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{{ r.punch_date }}</td>
+      <td>{{ r.project_name }}</td>
+      <td>{{ r.iom_id }}</td>
+      <td>{{ r.department }}</td>
+      <td>{{ r.week_number }}</td>
+      <td>{{ r.actual_hours }}</td>
+      <td>{{ r.wbs }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</body>
+</html>
