@@ -6,15 +6,14 @@
 <link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
 <link rel="stylesheet" href="{% static 'css/team_allocations.css' %}">
 <style>
+/* layout */
 .container { max-width:1200px; margin:18px auto; }
 .panel { background:#fff; border-radius:10px; padding:18px; box-shadow:0 8px 20px rgba(2,6,23,0.04); }
 
+/* top controls */
 .controls-row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
-
-/* reuse the page-controls/control-card classes from team_allocations.css */
-.page-controls { display:flex; gap:12px; align-items:center; justify-content:flex-end; margin-bottom:8px; }
+.page-controls { display:flex; gap:12px; align-items:center; justify-content:flex-end; }
 .control-card { display:inline-flex; gap:10px; align-items:center; padding:8px 12px; border-radius:12px; background:linear-gradient(180deg, rgba(255,255,255,0.9), rgba(250,250,255,0.85)); border:1px solid rgba(15,23,42,0.04); box-shadow:0 6px 18px rgba(12,36,75,0.06); }
-.ctrl-label { color:#374151; font-size:13px; margin-right:6px; white-space:nowrap; }
 .input-month { min-width:150px; padding:8px 10px; border-radius:10px; border:1px solid rgba(203,213,225,0.8); background:linear-gradient(180deg,#ffffff,#fbfdff); font-size:14px; }
 .btn-load { background: linear-gradient(90deg, #1e3a8a 0%, #2563eb 60%); color: #fff; padding: 9px 16px; border-radius: 10px; font-weight:700; border:none; cursor:pointer; box-shadow:0 8px 20px rgba(37,99,235,0.18); }
 
@@ -23,25 +22,36 @@
 .btn-toggle { padding:8px 12px; border-radius:8px; border:1px solid #e6eaf0; background:#fff; cursor:pointer; font-weight:700; }
 .btn-toggle.active { background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; border:none; box-shadow:0 8px 20px rgba(37,99,235,0.12); }
 
-/* allocations table */
-.alloc-table { width:100%; border-collapse:collapse; margin-top:10px; }
-.alloc-table th, .alloc-table td { padding:10px 12px; border-bottom:1px solid #eef2f7; vertical-align:middle; text-align:left; }
-.alloc-table thead th { background:#f8fafc; font-weight:700; color:#374151; }
+/* compact weekly-per-project table */
+.alloc-card { margin-top:12px; border-radius:10px; padding:14px; background:#fbfdff; border:1px solid #eef2f7; }
+.project-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.project-title { font-weight:700; }
+.small-muted { color:#6b7280; font-size:13px; }
 
-.week-punch { width:88px; padding:6px; border-radius:6px; border:1px solid #d1d5db; }
+/* vertical weeks table (CW rows) */
+.weeks-table { width:100%; border-collapse:collapse; margin-top:6px; }
+.weeks-table th, .weeks-table td { padding:8px 10px; border-bottom:1px solid #eef2f7; text-align:left; vertical-align:middle; }
+.weeks-table thead th { background:#f8fafc; font-weight:700; color:#374151; }
 
+/* daily view styles */
 .daily-grid { width:100%; border-collapse:collapse; margin-top:12px; }
-.daily-grid th, .daily-grid td { padding:8px; border-bottom:1px solid #f3f4f6; }
+.daily-grid th, .daily-grid td { padding:8px; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
+.day-disabled { color:#9aa3b2; background:#fafafa; }
 
-.remaining {
-  font-size:12px; font-weight:700; padding:3px 6px; border-radius:6px;
-  display:inline-block; margin-left:8px;
-}
+/* inputs and remaining */
+.input-small { width:84px; padding:6px; border-radius:6px; border:1px solid #d1d5db; }
+.remaining { font-size:12px; font-weight:700; padding:3px 6px; border-radius:6px; display:inline-block; margin-left:8px; }
 .remaining.safe { background: rgba(16,185,129,0.12); color: #065f46; }
 .remaining.warn { background: rgba(245,158,11,0.12); color:#92400e; }
 .remaining.over { background: rgba(239,68,68,0.12); color:#991b1b; }
 
-.small-muted { color:#6b7280; font-size:13px; }
+/* week-summary (daily view) */
+.week-summary { display:flex; gap:12px; align-items:center; margin-bottom:6px; }
+.week-summary .badge { padding:6px 10px; border-radius:8px; background:#f8fafc; font-weight:700; color:#1f2937; }
+.week-summary.over { background:#fee2e2; color:#9f1239; }
+
+/* save button disabled state */
+.btn-save-daily[disabled] { opacity:0.5; cursor:not-allowed; }
 </style>
 {% endblock %}
 
@@ -54,10 +64,9 @@
         <p class="small-muted">Toggle between Weekly and Daily punching views. You cannot punch more than the allocated hours for the week.</p>
       </div>
 
-      <!-- top-right month controls: submits ?month=YYYY-MM -->
       <div class="page-controls" aria-label="Month controls">
         <form method="get" class="control-card" style="align-items:center;">
-          <label class="ctrl-label">Select month</label>
+          <label class="ctrl-label small-muted" style="margin-right:6px;">Select month</label>
           <input class="input-month" type="month" name="month" value="{{ month_start|date:'Y-m' }}">
           <button class="btn-load" type="submit">Load</button>
         </form>
@@ -69,145 +78,150 @@
       <button id="btn-daily" class="btn-toggle" role="tab" aria-selected="false">Daily View</button>
     </div>
 
-    <!-- WEEKLY VIEW -->
+    {# ---------------- WEEKLY VIEW ---------------- #}
     <div id="weekly-view" role="tabpanel" aria-labelledby="btn-weekly">
       {% if not rows %}
         <div style="padding:18px;border-radius:8px;background:#fff;">No allocations found for you this month.</div>
       {% else %}
-        <table class="alloc-table" aria-describedby="WeeklyAllocTable">
-          <thead>
-            <tr>
-              <th>Project</th>
-              <th>Domain</th>
-              <th>Allocated (Total)</th>
-              <th>W1 Alloc</th><th>W1 Punched</th><th>W1 Punch</th>
-              <th>W2 Alloc</th><th>W2 Punched</th><th>W2 Punch</th>
-              <th>W3 Alloc</th><th>W3 Punched</th><th>W3 Punch</th>
-              <th>W4 Alloc</th><th>W4 Punched</th><th>W4 Punch</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in rows %}
-              <tr data-allocation="{{ r.allocation_id }}">
-                <td style="min-width:180px;">{{ r.project_name }}</td>
-                <td>{{ r.domain_name }}</td>
-                <td>{{ r.total_hours }}</td>
+        {% for r in rows %}
+          <div class="alloc-card" data-allocation="{{ r.allocation_id }}">
+            <div class="project-head">
+              <div class="project-title">{{ r.project_name }} — <span class="small-muted">{{ r.domain_name }}</span></div>
+              <div class="small-muted">Total Alloc: {{ r.total_hours }}</div>
+            </div>
 
-                <!-- Week 1 -->
-                <td>{{ r.w1_alloc_hours }}</td>
-                <td>{{ r.w1_punched_hours }}</td>
-                <td>
-                  <div style="display:flex;align-items:center;gap:6px;">
-                    <input class="week-punch" type="number" min="0" step="0.25"
-                           data-week="1" value="{{ r.w1_punched_hours }}"
-                           data-alloc="{{ r.w1_alloc_hours }}" data-punched="{{ r.w1_punched_hours }}">
-                    <span class="remaining" data-remaining></span>
-                  </div>
-                </td>
+            <table class="weeks-table" aria-describedby="CW table for {{ r.allocation_id }}">
+              <thead>
+                <tr><th>CW#</th><th>Allocated</th><th>Punched</th><th>Enter Punch</th><th>Remaining</th></tr>
+              </thead>
+              <tbody>
+                <!-- week 1 -->
+                <tr data-week="1">
+                  <td>1</td>
+                  <td>{{ r.w1_alloc_hours }}</td>
+                  <td class="punched">{{ r.w1_punched_hours }}</td>
+                  <td>
+                    <input class="input-small week-punch" type="number" min="0" step="0.25"
+                       data-week="1" value="{{ r.w1_punched_hours }}" data-alloc="{{ r.w1_alloc_hours }}">
+                  </td>
+                  <td><span class="remaining" data-remaining></span></td>
+                </tr>
+                <!-- week 2 -->
+                <tr data-week="2">
+                  <td>2</td>
+                  <td>{{ r.w2_alloc_hours }}</td>
+                  <td class="punched">{{ r.w2_punched_hours }}</td>
+                  <td>
+                    <input class="input-small week-punch" type="number" min="0" step="0.25"
+                       data-week="2" value="{{ r.w2_punched_hours }}" data-alloc="{{ r.w2_alloc_hours }}">
+                  </td>
+                  <td><span class="remaining" data-remaining></span></td>
+                </tr>
+                <!-- week 3 -->
+                <tr data-week="3">
+                  <td>3</td>
+                  <td>{{ r.w3_alloc_hours }}</td>
+                  <td class="punched">{{ r.w3_punched_hours }}</td>
+                  <td>
+                    <input class="input-small week-punch" type="number" min="0" step="0.25"
+                       data-week="3" value="{{ r.w3_punched_hours }}" data-alloc="{{ r.w3_alloc_hours }}">
+                  </td>
+                  <td><span class="remaining" data-remaining></span></td>
+                </tr>
+                <!-- week 4 -->
+                <tr data-week="4">
+                  <td>4</td>
+                  <td>{{ r.w4_alloc_hours }}</td>
+                  <td class="punched">{{ r.w4_punched_hours }}</td>
+                  <td>
+                    <input class="input-small week-punch" type="number" min="0" step="0.25"
+                       data-week="4" value="{{ r.w4_punched_hours }}" data-alloc="{{ r.w4_alloc_hours }}">
+                  </td>
+                  <td><span class="remaining" data-remaining></span></td>
+                </tr>
+              </tbody>
+            </table>
 
-                <!-- Week 2 -->
-                <td>{{ r.w2_alloc_hours }}</td>
-                <td>{{ r.w2_punched_hours }}</td>
-                <td>
-                  <div style="display:flex;align-items:center;gap:6px;">
-                    <input class="week-punch" type="number" min="0" step="0.25"
-                           data-week="2" value="{{ r.w2_punched_hours }}"
-                           data-alloc="{{ r.w2_alloc_hours }}" data-punched="{{ r.w2_punched_hours }}">
-                    <span class="remaining" data-remaining></span>
-                  </div>
-                </td>
-
-                <!-- Week 3 -->
-                <td>{{ r.w3_alloc_hours }}</td>
-                <td>{{ r.w3_punched_hours }}</td>
-                <td>
-                  <div style="display:flex;align-items:center;gap:6px;">
-                    <input class="week-punch" type="number" min="0" step="0.25"
-                           data-week="3" value="{{ r.w3_punched_hours }}"
-                           data-alloc="{{ r.w3_alloc_hours }}" data-punched="{{ r.w3_punched_hours }}">
-                    <span class="remaining" data-remaining></span>
-                  </div>
-                </td>
-
-                <!-- Week 4 -->
-                <td>{{ r.w4_alloc_hours }}</td>
-                <td>{{ r.w4_punched_hours }}</td>
-                <td>
-                  <div style="display:flex;align-items:center;gap:6px;">
-                    <input class="week-punch" type="number" min="0" step="0.25"
-                           data-week="4" value="{{ r.w4_punched_hours }}"
-                           data-alloc="{{ r.w4_alloc_hours }}" data-punched="{{ r.w4_punched_hours }}">
-                    <span class="remaining" data-remaining></span>
-                  </div>
-                </td>
-
-                <td style="white-space:nowrap;">
-                  <button class="btn btn-save-week">Save Week</button>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            <div style="text-align:right; margin-top:8px;">
+              <button class="btn btn-save-week">Save Week</button>
+            </div>
+          </div>
+        {% endfor %}
       {% endif %}
     </div>
 
-    <!-- DAILY VIEW -->
+    {# ---------------- DAILY VIEW ---------------- #}
     <div id="daily-view" role="tabpanel" aria-labelledby="btn-daily" style="display:none; margin-top:12px;">
       {% if not rows %}
         <div style="padding:18px;border-radius:8px;background:#fff;">No allocations found for you this month.</div>
       {% else %}
-        <p class="small-muted">Daily punching: edit hours for each date. Weekly totals are validated on save.</p>
+        <p class="small-muted">Daily punching: only weekdays (Mon–Fri) are editable. Weekly totals are validated on Save.</p>
 
         {% for r in rows %}
-          <div style="margin-top:18px;padding:12px;border-radius:10px;background:#fbfdff;border:1px solid #eef2f7;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <div><strong>{{ r.project_name }}</strong> — <span class="small-muted">{{ r.domain_name }}</span></div>
+          <div class="alloc-card" data-allocation="{{ r.allocation_id }}">
+            <div class="project-head">
+              <div class="project-title">{{ r.project_name }} — <span class="small-muted">{{ r.domain_name }}</span></div>
               <div class="small-muted">Total Alloc: {{ r.total_hours }}</div>
             </div>
 
-            <table class="daily-grid" style="margin-top:8px;">
-              <thead>
-                <tr>
-                  <th style="width:130px">Date</th>
-                  <th>Week Alloc</th>
-                  <th>Punched</th>
-                  <th>Enter Punch</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for d in daily_dates %}
-                  {% with ds=d.date|date:"Y-m-d" %}
-                  <tr data-allocation="{{ r.allocation_id }}" data-date="{{ ds }}" data-weeknum="{{ d.week_number }}">
-                    <td>{{ d.date|date:"D, d M" }}</td>
+            {# group by week number for this allocation #}
+            {% for wk in "1,2,3,4"|cut:","|make_list %} {# temporary loop to render up to 4 weeks — we'll use if blocks below #}
+            {% endfor %}
 
-                    <td>
-                      {% if d.week_number == 1 %}{{ r.w1_alloc_hours }}
-                      {% elif d.week_number == 2 %}{{ r.w2_alloc_hours }}
-                      {% elif d.week_number == 3 %}{{ r.w3_alloc_hours }}
-                      {% else %}{{ r.w4_alloc_hours }}
-                      {% endif %}
-                    </td>
+            {# We'll iterate daily_dates but render grouped by week_number #}
+            {% regroup daily_dates by week_number as weeks %}
+            {% for week in weeks %}
+              {% comment %} week.grouper is week number (1..4), week.list is list of date dicts {% endcomment %}
+              <div style="margin-top:12px;">
+                <div class="week-summary" data-week="{{ week.grouper }}">
+                  {% comment %} show allocated for week {week.grouper} from row r {% endcomment %}
+                  {% if week.grouper == 1 %}<div class="badge">W{{ week.grouper }} Alloc: {{ r.w1_alloc_hours }}</div>{% endif %}
+                  {% if week.grouper == 2 %}<div class="badge">W{{ week.grouper }} Alloc: {{ r.w2_alloc_hours }}</div>{% endif %}
+                  {% if week.grouper == 3 %}<div class="badge">W{{ week.grouper }} Alloc: {{ r.w3_alloc_hours }}</div>{% endif %}
+                  {% if week.grouper == 4 %}<div class="badge">W{{ week.grouper }} Alloc: {{ r.w4_alloc_hours }}</div>{% endif %}
+                  <div class="small-muted">Punched (week): <span class="week-punched">None</span></div>
+                  <div class="small-muted">Remaining: <span class="week-remaining">0.00</span></div>
+                </div>
 
-                    <td class="existing-punch">{{ daily_map|dict_get:r.allocation_id|dict_get:ds }}</td>
+                <table class="daily-grid">
+                  <thead>
+                    <tr><th style="width:140px">Date</th><th>Week Alloc</th><th>Punched</th><th>Enter Punch</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for d in week.list %}
+                      {% with ds=d.date|date:"Y-m-d" %}
+                      <tr data-date="{{ ds }}" data-weeknum="{{ d.week_number }}" class="{% if d.is_weekend %}day-disabled{% endif %}">
+                        <td>{{ d.date|date:"D, d M" }}</td>
+                        <td>
+                          {% if d.week_number == 1 %}{{ r.w1_alloc_hours }}
+                          {% elif d.week_number == 2 %}{{ r.w2_alloc_hours }}
+                          {% elif d.week_number == 3 %}{{ r.w3_alloc_hours }}
+                          {% else %}{{ r.w4_alloc_hours }}
+                          {% endif %}
+                        </td>
+                        <td class="existing-punch">
+                          {{ daily_map|dict_get:r.allocation_id|dict_get:ds }}
+                        </td>
+                        <td>
+                          {% if d.is_weekend %}
+                            <input class="input-small daily-input" type="number" disabled value="{{ daily_map|dict_get:r.allocation_id|dict_get:ds }}" />
+                          {% else %}
+                            <input class="input-small daily-input" type="number" min="0" step="0.25"
+                                   value="{{ daily_map|dict_get:r.allocation_id|dict_get:ds }}"
+                                   data-date="{{ ds }}" data-weeknum="{{ d.week_number }}" />
+                          {% endif %}
+                        </td>
+                      </tr>
+                      {% endwith %}
+                    {% endfor %}
+                  </tbody>
+                </table>
 
-                    <td>
-                      <div style="display:flex;align-items:center;gap:6px;">
-                        <input class="week-punch daily-input" type="number" min="0" step="0.25"
-                               value="{{ daily_map|dict_get:r.allocation_id|dict_get:ds }}"
-                               data-date="{{ ds }}" data-weeknum="{{ d.week_number }}">
-                        <span class="remaining" data-remaining></span>
-                      </div>
-                    </td>
-                  </tr>
-                  {% endwith %}
-                {% endfor %}
-              </tbody>
-            </table>
-
-            <div style="margin-top:8px;text-align:right;">
-              <button class="btn btn-save-daily">Save Daily Punches</button>
-            </div>
+                <div style="text-align:right; margin-top:6px;">
+                  <button class="btn btn-save-daily" data-week="{{ week.grouper }}">Save Week {{ week.grouper }} Punches</button>
+                </div>
+              </div>
+            {% endfor %}
           </div>
         {% endfor %}
       {% endif %}
@@ -219,125 +233,224 @@
 
 {% block extra_js %}
 <script>
+document.addEventListener('DOMContentLoaded', function () {
+  try {
+    // find controls
+    const btnWeekly = document.getElementById('btn-weekly');
+    const btnDaily = document.getElementById('btn-daily');
+    const weeklyView = document.getElementById('weekly-view');
+    const dailyView = document.getElementById('daily-view');
+
+    if (!btnWeekly || !btnDaily || !weeklyView || !dailyView) {
+      console.warn('My Allocations: toggle elements missing', { btnWeekly, btnDaily, weeklyView, dailyView });
+      return;
+    }
+
+    // ensure buttons don't submit parent forms by accident
+    btnWeekly.setAttribute('type', 'button');
+    btnDaily.setAttribute('type', 'button');
+
+    function showView(view) {
+      if (view === 'weekly') {
+        weeklyView.style.display = '';
+        dailyView.style.display = 'none';
+        btnWeekly.classList.add('active');
+        btnDaily.classList.remove('active');
+        btnWeekly.setAttribute('aria-selected', 'true');
+        btnDaily.setAttribute('aria-selected', 'false');
+      } else {
+        weeklyView.style.display = 'none';
+        dailyView.style.display = '';
+        btnWeekly.classList.remove('active');
+        btnDaily.classList.add('active');
+        btnWeekly.setAttribute('aria-selected', 'false');
+        btnDaily.setAttribute('aria-selected', 'true');
+      }
+    }
+
+    // Attach handlers
+    btnWeekly.addEventListener('click', function (e) {
+      e.preventDefault();
+      showView('weekly');
+    });
+
+    btnDaily.addEventListener('click', function (e) {
+      e.preventDefault();
+      showView('daily');
+    });
+
+    // optionally respect last selected tab from localStorage
+    try {
+      const last = localStorage.getItem('myAlloc_view') || 'weekly';
+      showView(last);
+      // store on change
+      btnWeekly.addEventListener('click', () => localStorage.setItem('myAlloc_view', 'weekly'));
+      btnDaily.addEventListener('click', () => localStorage.setItem('myAlloc_view', 'daily'));
+    } catch (err) {
+      // ignore storage errors in private mode
+    }
+
+    // expose for debugging in console
+    window.myAllocShowView = showView;
+
+  } catch (err) {
+    console.error('My Allocations toggle init failed', err);
+  }
+});
+</script>
+
+<script>
+/* Helper */
 function getCookie(name){ const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return v?v.pop():''; }
 const CSRFTOKEN = getCookie('csrftoken');
 
-function setRemainingSpan(span, rem, alloc){
-  span.textContent = 'Rem: ' + rem.toFixed(2);
-  span.classList.remove('safe','warn','over');
-  if (rem < 0) span.classList.add('over');
-  else if (rem < alloc*0.2) span.classList.add('warn');
-  else span.classList.add('safe');
+function setBadge(el, rem, alloc){
+  el.textContent = rem.toFixed(2);
+  el.classList.remove('safe','warn','over');
+  if(rem < 0) el.classList.add('over');
+  else if(rem < alloc*0.2) el.classList.add('warn');
+  else el.classList.add('safe');
 }
 
-function updateWeeklyRemainingForInput(inp){
-  const alloc = parseFloat(inp.dataset.alloc || '0') || 0;
-  const val = parseFloat(inp.value || '0') || 0;
-  const rem = alloc - val;
-  const span = inp.parentElement.querySelector('[data-remaining]');
-  if (span) setRemainingSpan(span, rem, alloc);
-}
-
-function initWeeklyRemaining(){
-  document.querySelectorAll('#weekly-view input.week-punch').forEach(inp=>{
-    updateWeeklyRemainingForInput(inp);
-    inp.addEventListener('input', () => updateWeeklyRemainingForInput(inp));
+/* ---------- WEEKLY view remaining (vertical rows) ---------- */
+function initWeeklyCard(card){
+  // for each week input compute remaining = alloc - inputValue
+  const inputs = card.querySelectorAll('input.week-punch');
+  inputs.forEach(inp=>{
+    function update(){
+      const alloc = parseFloat(inp.dataset.alloc||'0')||0;
+      const val = parseFloat(inp.value||'0')||0;
+      const rem = alloc - val;
+      const span = inp.closest('tr').querySelector('[data-remaining]');
+      if(span) setBadge(span, rem, alloc);
+    }
+    update();
+    inp.addEventListener('input', update);
   });
 }
 
-function updateDailyRemaining(){
-  const groups = {};
-  document.querySelectorAll('#daily-view tr[data-weeknum]').forEach(tr=>{
-    const allocId = tr.dataset.allocation;
-    const wk = tr.dataset.weeknum;
-    const key = allocId + '|' + wk;
-    const allocCell = tr.querySelector('td:nth-child(2)');
-    const alloc = parseFloat((allocCell && allocCell.textContent) || '0') || 0;
-    const inp = tr.querySelector('input.daily-input');
-    const val = parseFloat((inp && inp.value) || '0') || 0;
-    if (!groups[key]) groups[key] = {alloc: alloc, sum: 0, inputs: []};
-    groups[key].sum += val;
-    if (inp) groups[key].inputs.push(inp);
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('.alloc-card').forEach(initWeeklyCard);
+});
+
+/* ---------- DAILY view: weekly totals, weekend disabling and save control ---------- */
+
+function computeWeekSummaryForAllocation(card, weekNum){
+  // find all rows for this week inside this card
+  const rows = Array.from(card.querySelectorAll('tr[data-weeknum="'+weekNum+'"]'));
+  // fetch allocation for this week from first row's 2nd cell text
+  if(rows.length === 0) return {alloc:0, sum:0};
+  const allocText = rows[0].cells[1].textContent.trim() || "0";
+  const alloc = parseFloat(allocText) || 0;
+  let sum = 0.0;
+  rows.forEach(r=>{
+    const inp = r.querySelector('input.daily-input');
+    if(inp && !inp.disabled){
+      sum += parseFloat(inp.value||'0') || 0;
+    }
   });
-  Object.values(groups).forEach(g=>{
-    const rem = g.alloc - g.sum;
-    g.inputs.forEach(inp=>{
-      const span = inp.parentElement.querySelector('[data-remaining]');
-      if (span) setRemainingSpan(span, rem, g.alloc);
+  return {alloc: alloc, sum: sum};
+}
+
+function updateDailySummaries(){
+  // iterate each alloc card
+  document.querySelectorAll('.alloc-card').forEach(card=>{
+    // find unique week numbers inside this card
+    const weekContainers = card.querySelectorAll('.week-summary');
+    weekContainers.forEach(ws=>{
+      const weekNum = ws.dataset.week;
+      const summary = computeWeekSummaryForAllocation(card, weekNum);
+      const punchedEl = ws.querySelector('.week-punched');
+      const remEl = ws.querySelector('.week-remaining');
+      if(punchedEl) punchedEl.textContent = summary.sum.toFixed(2);
+      if(remEl){
+        const rem = summary.alloc - summary.sum;
+        remEl.textContent = rem.toFixed(2);
+        // style and disable save if over
+        if(rem < 0) ws.classList.add('over'); else ws.classList.remove('over');
+      }
+      // enable/disable save button for this week
+      const saveBtn = card.querySelector('.btn-save-daily[data-week="'+weekNum+'"]');
+      if(saveBtn){
+        if(summary.sum > summary.alloc) saveBtn.setAttribute('disabled','disabled'); else saveBtn.removeAttribute('disabled');
+      }
     });
   });
 }
 
-function initDailyRemaining(){
-  document.querySelectorAll('#daily-view input.daily-input').forEach(inp=>{
-    inp.addEventListener('input', updateDailyRemaining);
-  });
-  updateDailyRemaining();
-}
+document.addEventListener('input', function(ev){
+  if(ev.target && ev.target.matches('input.daily-input')){
+    updateDailySummaries();
+  }
+});
 
 document.addEventListener('DOMContentLoaded', function(){
-  initWeeklyRemaining();
-  initDailyRemaining();
+  // initialize daily inputs & summaries
+  updateDailySummaries();
 });
 
-document.getElementById('btn-weekly').addEventListener('click', function(){
-  document.getElementById('weekly-view').style.display = '';
-  document.getElementById('daily-view').style.display = 'none';
-  this.classList.add('active'); document.getElementById('btn-daily').classList.remove('active');
-});
-document.getElementById('btn-daily').addEventListener('click', function(){
-  document.getElementById('weekly-view').style.display = 'none';
-  document.getElementById('daily-view').style.display = '';
-  this.classList.add('active'); document.getElementById('btn-weekly').classList.remove('active');
-});
+/* ---------- Save endpoints ---------- */
 
-// Save weekly punches
+// Save weekly punches (vertical weekly card): this saves all 4 week inputs for the allocation (same as earlier)
 document.addEventListener('click', function(ev){
   if(!ev.target.matches('.btn-save-week')) return;
-  const tr = ev.target.closest('tr[data-allocation]');
-  const allocationId = Number(tr.dataset.allocation);
-  const inputs = Array.from(tr.querySelectorAll('input.week-punch'));
-  const payloads = inputs.map(inp => ({week_number: Number(inp.dataset.week), actual_hours: parseFloat(inp.value||'0')}));
+  const card = ev.target.closest('.alloc-card');
+  const allocationId = card.dataset.allocation;
+  // collect 4 week inputs
+  const inputs = Array.from(card.querySelectorAll('input.week-punch'));
+  const payloads = inputs.map(i=>({week_number: Number(i.dataset.week), actual_hours: parseFloat(i.value||'0')||0}));
   if(!confirm('Save weekly punches for this allocation?')) return;
   let i=0;
   function sendNext(){
-    if(i>=payloads.length){ alert('Saved weekly punches'); location.reload(); return; }
+    if(i>=payloads.length){ alert('Saved'); location.reload(); return; }
+    const p = payloads[i];
     fetch("{% url 'projects:save_my_alloc_weekly' %}", {
       method:'POST', credentials:'same-origin',
       headers:{'Content-Type':'application/json','X-CSRFToken':CSRFTOKEN},
-      body:JSON.stringify({allocation_id:allocationId, week_number:payloads[i].week_number, actual_hours:payloads[i].actual_hours})
-    }).then(r=>r.json()).then(j=>{ if(j&&j.ok){i++;sendNext();} else{alert('Error: '+(j.error||JSON.stringify(j)));} })
-    .catch(err=>alert('Save failed: '+err));
+      body: JSON.stringify({ allocation_id: Number(allocationId), week_number: p.week_number, actual_hours: p.actual_hours })
+    }).then(r=>r.json()).then(j=>{
+      if(j && j.ok){ i++; sendNext(); } else { alert('Error: '+(j && j.error? j.error : JSON.stringify(j))); }
+    }).catch(err=>{ alert('Save failed: '+err); });
   }
   sendNext();
 });
 
-// Save daily punches
+// Save daily punches for a particular allocation-week (Save button exists per week inside each card)
 document.addEventListener('click', function(ev){
   if(!ev.target.matches('.btn-save-daily')) return;
-  const panel = ev.target.closest('div[style*="margin-top:18px"]');
-  const rows = Array.from(panel.querySelectorAll('tr[data-date]'));
-  const allocationId = Number(panel.querySelector('tr[data-allocation]').dataset.allocation);
-  const tasks=[];
-  rows.forEach(tr=>{
-    const inp=tr.querySelector('input.daily-input');
-    const date=tr.dataset.date;
-    const val=parseFloat(inp.value||'0');
-    const existing=parseFloat(tr.querySelector('.existing-punch').innerText||'0');
-    if(val!==existing){tasks.push({punch_date:date, actual_hours:val});}
+  const btn = ev.target;
+  const weekNum = btn.dataset.week;
+  const card = btn.closest('.alloc-card');
+  const allocationId = Number(card.dataset.allocation);
+  // gather rows for this week
+  const rows = Array.from(card.querySelectorAll('tr[data-weeknum="'+weekNum+'"]'));
+  const tasks = [];
+  rows.forEach(r=>{
+    const inp = r.querySelector('input.daily-input');
+    if(!inp) return;
+    const date = r.dataset.date;
+    const val = parseFloat(inp.value||'0')||0;
+    const existing = parseFloat(r.querySelector('.existing-punch').textContent||'0')||0;
+    if(val !== existing) tasks.push({punch_date: date, actual_hours: val});
   });
-  if(tasks.length===0){alert('No changes');return;}
-  if(!confirm('Save daily punches for this project?'))return;
-  let i=0;
+  if(tasks.length === 0){ alert('No changes to save for this week'); return; }
+  if(!confirm('Save daily punches for week '+weekNum+'?')) return;
+  // validate on client: ensure weekly total <= alloc
+  const summary = computeWeekSummaryForAllocation(card, weekNum);
+  if(summary.sum > summary.alloc){ alert('Weekly total exceeds allocation, fix before saving'); return; }
+
+  // send sequentially
+  let idx = 0;
   function sendOne(){
-    if(i>=tasks.length){alert('Saved daily punches');location.reload();return;}
-    const t=tasks[i];
+    if(idx >= tasks.length){ alert('Saved daily punches'); location.reload(); return; }
+    const t = tasks[idx];
     fetch("{% url 'projects:save_my_alloc_daily' %}", {
       method:'POST', credentials:'same-origin',
       headers:{'Content-Type':'application/json','X-CSRFToken':CSRFTOKEN},
-      body:JSON.stringify({allocation_id:allocationId,punch_date:t.punch_date,actual_hours:t.actual_hours})
-    }).then(r=>r.json()).then(j=>{ if(j&&j.ok){i++;sendOne();} else{alert('Error: '+(j.error||JSON.stringify(j)));} })
-    .catch(err=>alert('Save failed: '+err));
+      body: JSON.stringify({ allocation_id: allocationId, punch_date: t.punch_date, actual_hours: t.actual_hours })
+    }).then(r=>r.json()).then(j=>{
+      if(j && j.ok){ idx++; sendOne(); } else { alert('Failed to save '+t.punch_date+': '+(j.error || JSON.stringify(j))); }
+    }).catch(err=>{ alert('Save failed: '+err); });
   }
   sendOne();
 });

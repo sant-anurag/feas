@@ -3,7 +3,7 @@ import logging
 import json
 from math import ceil
 from datetime import datetime
-
+from datetime import timedelta
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -100,11 +100,12 @@ def get_month_start_and_end(year_month):
     last_day = next_month - timedelta(days=1)
     return (dt, last_day)
 
-def month_day_to_week_number(dt):
-    "Map day-of-month to week 1..4 (days 1-7 =>1, 8-14=>2, 15-21=>3, 22-31=>4)"
-    d = dt.day
-    wk = (d - 1) // 7 + 1
-    return min(4, wk)
+def month_day_to_week_number(d):
+    """
+    Convert a date d (a datetime.date) to a month-week bucket 1..4.
+    Uses the same logic: days 1-7 -> week 1, 8-14 -> week 2, 15-21 -> week 3, >=22 -> week 4.
+    """
+    return min(((d.day - 1) // 7) + 1, 4)
 
 def _ensure_user_from_ldap(request, samaccountname):
     """
@@ -1533,19 +1534,34 @@ def save_team_allocation(request):
 def my_allocations(request):
     """
     Shows weekly & daily views for the logged-in user's allocations for selected month.
-    data produced:
+
+    Produces context:
       - rows: list of allocation rows with fields:
         allocation_id, project_name, domain_name, total_hours,
-        w1_alloc_hours, w1_punched_hours, w1_status (optional), ... w4_*
-      - daily_dates: list of date objects for the month (for daily view)
-      - daily_map: { allocation_id: { 'YYYY-MM-DD': punched_hours, ... }, ... }
+        w1_alloc_hours, w1_punched_hours, ... w4_*
+      - daily_dates: list of dicts: { "date": date_obj, "week_number": 1..4,
+                                     "is_weekend": bool, "iso": "YYYY-MM-DD" }
+      - daily_map: { allocation_id: { 'YYYY-MM-DD': '0.00', ... }, ... }
+      - month_start: date for header
     """
-    session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or request.user.email
+    # local imports to keep this function self-contained when pasted
+    from datetime import timedelta, date as _date
+    from decimal import Decimal
+
+    # fallback helper if not defined elsewhere in module
+    try:
+        month_day_to_week_number  # type: ignore
+    except NameError:
+        def month_day_to_week_number(d):
+            # days 1-7 -> 1, 8-14 -> 2, 15-21 -> 3, 22+ -> 4
+            return min(((d.day - 1) // 7) + 1, 4)
+
+    session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or getattr(request.user, "email", None)
     if not session_ldap:
         return HttpResponseBadRequest("No LDAP user in session")
 
     # month param from querystring (YYYY-MM), default to current month
-    month_param = request.GET.get("month", date.today().strftime("%Y-%m"))
+    month_param = request.GET.get("month", _date.today().strftime("%Y-%m"))
     month_start, month_end = get_month_start_and_end(month_param)
 
     # Step 1: fetch allocations (monthly_allocation_entries) for this user & month
@@ -1587,11 +1603,11 @@ def my_allocations(request):
                 }
 
     # Step 3: fetch user punches (both weekly and daily) for these allocation_ids within month
-    punches = []  # raw rows
-    user_punch_map_week = {}  # { allocation_id: {week_number: Decimal(total_hours)} }
+    user_punch_map_week = {}   # { allocation_id: {week_number: Decimal(total_hours)} }
     user_punch_map_daily = {}  # { allocation_id: { 'YYYY-MM-DD': Decimal(hours) } }
     if allocation_ids:
         in_clause = ",".join(["%s"] * len(allocation_ids))
+        # param order: session_ldap, allocation ids..., month_start, month_end
         params = [session_ldap] + allocation_ids + [month_start, month_end]
         with connection.cursor() as cur:
             cur.execute(f"""
@@ -1603,24 +1619,26 @@ def my_allocations(request):
             """, params)
             for r in dictfetchall(cur):
                 aid = r['allocation_id']
-                if r['week_number'] is not None:
+                # weekly punches stored with week_number
+                if r.get('week_number') is not None:
                     wk = int(r['week_number'])
                     user_punch_map_week.setdefault(aid, {})
-                    user_punch_map_week[aid][wk] = user_punch_map_week[aid].get(wk, Decimal('0.00')) + Decimal(str(r['actual_hours'] or '0.00'))
-                if r['punch_date']:
+                    user_punch_map_week[aid][wk] = user_punch_map_week[aid].get(wk, Decimal('0.00')) + Decimal(str(r.get('actual_hours') or '0.00'))
+                # daily punches stored with punch_date
+                if r.get('punch_date'):
                     dstr = r['punch_date'].strftime("%Y-%m-%d")
                     user_punch_map_daily.setdefault(aid, {})
-                    user_punch_map_daily[aid][dstr] = Decimal(str(r['actual_hours'] or '0.00'))
+                    user_punch_map_daily[aid][dstr] = Decimal(str(r.get('actual_hours') or '0.00'))
 
     # Step 4: build final rows that template consumes
     rows = []
     for r in alloc_rows:
         aid = r['allocation_id']
-        total_hours = Decimal(str(r['total_hours'] or '0.00'))
+        total_hours = Decimal(str(r.get('total_hours') or '0.00'))
         row = {
             'allocation_id': aid,
-            'project_name': r['project_name'],
-            'domain_name': r['domain_name'],
+            'project_name': r.get('project_name') or '',
+            'domain_name': r.get('domain_name') or '',
             'total_hours': format(total_hours, '0.2f')
         }
         # for each week 1..4 attach allocated and punched
@@ -1631,28 +1649,36 @@ def my_allocations(request):
             row[f'w{wk}_punched_hours'] = format(punched_w, '0.2f')
         rows.append(row)
 
-    # Step 5: prepare daily grid (list of dates)
-    dates = []
+    # Step 5: prepare daily grid (list of date dicts)
+    daily_dates = []
     cur_day = month_start
     while cur_day <= month_end:
-        dates.append(cur_day)
-        cur_day += timedelta(days=1)
-    # daily_map to be used by template: { allocation_id: { 'YYYY-MM-DD': '0.00', ... } }
+        wk = month_day_to_week_number(cur_day)
+        daily_dates.append({
+            "date": cur_day,
+            "week_number": wk,
+            "is_weekend": cur_day.weekday() >= 5,  # Saturday=5, Sunday=6
+            "iso": cur_day.strftime("%Y-%m-%d"),
+        })
+        cur_day = cur_day + timedelta(days=1)
+
+    # Step 6: daily_map to be used by template: { allocation_id: { 'YYYY-MM-DD': '0.00', ... } }
     daily_map = {}
     for r in alloc_rows:
         aid = r['allocation_id']
         daymap = {}
-        for d in dates:
-            s = d.strftime("%Y-%m-%d")
+        for d in daily_dates:
+            s = d['iso']  # string "YYYY-MM-DD"
             daymap[s] = format(user_punch_map_daily.get(aid, {}).get(s, Decimal('0.00')), '0.2f')
         daily_map[aid] = daymap
 
     return render(request, "projects/my_allocations.html", {
         'rows': rows,
-        'daily_dates': dates,
+        'daily_dates': daily_dates,
         'daily_map': daily_map,
         'month_start': month_start,
     })
+
 
 
 # ---------- save weekly punches endpoint ----------
