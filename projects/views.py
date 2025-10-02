@@ -37,7 +37,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.db import connection, transaction
-
+from django.template.loader import render_to_string
 import json
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
@@ -2342,6 +2342,11 @@ def get_iom_details(request):
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from django.http import HttpResponse
+from datetime import date  # Add this if missing
+import io  # Add this if missing
+import openpyxl
+from xhtml2pdf import pisa
+from openpyxl.utils import get_column_letter
 
 @require_GET
 def export_allocations(request):
@@ -2465,7 +2470,7 @@ def export_my_punches_pdf(request):
     if not session_ldap:
         return HttpResponseBadRequest("Not authenticated")
 
-    month_param = request.GET.get("month", _date.today().strftime("%Y-%m"))
+    month_param = request.GET.get("month", date.today().strftime("%Y-%m"))
     month_start, month_end = get_month_start_and_end(month_param)
 
     with connection.cursor() as cur:
@@ -2499,7 +2504,7 @@ def export_my_punches_excel(request):
     if not session_ldap:
         return HttpResponseBadRequest("Not authenticated")
 
-    month_param = request.GET.get("month", _date.today().strftime("%Y-%m"))
+    month_param = request.GET.get("month", date.today().strftime("%Y-%m"))
     month_start, month_end = get_month_start_and_end(month_param)
 
     # fetch punches for user & month

@@ -180,6 +180,43 @@
   cursor: pointer;
 }
 .btn-save-week:hover, .btn-save-daily:hover { transform: translateY(-2px); }
+/* --- Program header highlight --- */
+.project-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  padding:10px 12px;
+  border-radius:8px;
+  background: linear-gradient(90deg, rgba(37,99,235,0.06), rgba(99,102,241,0.02));
+  border: 1px solid rgba(225,231,255,0.5);
+  margin-bottom:10px;
+}
+.project-title {
+  font-weight:800;
+  font-size:15px;
+  color:#0f172a; /* darker */
+  letter-spacing:0.2px;
+}
+.project-head .small-muted { color:#6b7280; margin-top:2px; }
+
+/* slightly lift each week-block under hover */
+.week-block { transition: transform .12s ease, box-shadow .12s ease; border-radius:8px; }
+.week-block:hover { transform: translateY(-4px); box-shadow: 0 10px 26px rgba(12,36,75,0.06); }
+.btn-export {
+  padding:8px 12px;
+  border-radius:8px;
+  font-weight:700;
+  color:#fff;
+  text-decoration:none;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  box-shadow:0 10px 20px rgba(2,6,23,0.06);
+}
+.btn-export-excel { background: linear-gradient(90deg,#16a34a,#10b981); }
+.btn-export-pdf   { background: linear-gradient(90deg,#ef4444,#f97316); }
+.btn-export:hover { transform: translateY(-2px); }
 
 </style>
 
@@ -206,6 +243,10 @@
     <div class="toggle-controls" role="tablist" aria-label="View toggle">
       <button id="btn-weekly" class="btn-toggle active" role="tab" aria-selected="true">Weekly View</button>
       <button id="btn-daily" class="btn-toggle" role="tab" aria-selected="false">Daily View</button>
+        <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+          <a class="btn-export btn-export-excel" href="{% url 'projects:export_my_punches_excel' %}?month={{ month_start|date:'Y-m' }}" role="button">Export Excel</a>
+          <a class="btn-export btn-export-pdf" href="{% url 'projects:export_my_punches_pdf' %}?month={{ month_start|date:'Y-m' }}" role="button">Export PDF</a>
+        </div>
     </div>
 
     {# ---------------- WEEKLY VIEW ---------------- #}
@@ -344,7 +385,10 @@
             {% regroup daily_dates by week_number as weeks %}
             {% for week in weeks %}
               <div style="margin-top:12px;">
-                <div class="week-summary" data-week="{{ week.grouper }}">
+                {# week-summary with explicit data-alloc so JS can read allocation reliably #}
+                <div class="week-summary"
+                     data-week="{{ week.grouper }}"
+                     data-alloc="{% if week.grouper == 1 %}{{ r.w1_alloc_hours }}{% elif week.grouper == 2 %}{{ r.w2_alloc_hours }}{% elif week.grouper == 3 %}{{ r.w3_alloc_hours }}{% else %}{{ r.w4_alloc_hours }}{% endif %}">
                   {% if week.grouper == 1 %}<div class="badge">W{{ week.grouper }} Alloc: {{ r.w1_alloc_hours }}</div>{% endif %}
                   {% if week.grouper == 2 %}<div class="badge">W{{ week.grouper }} Alloc: {{ r.w2_alloc_hours }}</div>{% endif %}
                   {% if week.grouper == 3 %}<div class="badge">W{{ week.grouper }} Alloc: {{ r.w3_alloc_hours }}</div>{% endif %}
@@ -356,13 +400,13 @@
                 <table class="daily-grid">
                   <thead>
                       <tr>
-                        <th style="width:180px">Date</th>
-                        <th style="width:120px">Week Alloc</th>
-                        <th style="width:120px">Punched</th>
-                        <th style="min-width:220px">WBS</th>
-                        <th style="width:120px">Enter Punch</th>
+                        <th style="width:220px">Date</th>
+                        <th style="width:140px">Punched</th>
+                        <th style="min-width:260px">WBS</th>
+                        <th style="width:140px">Enter Punch</th>
                       </tr>
-                    </thead>
+                  </thead>
+
 
                   <tbody>
                     {% for d in week.list %}
@@ -371,22 +415,16 @@
                           class="{% if d.is_weekend or holidays_map|dict_get:ds %}day-disabled{% endif %}"
                           title="{% if holidays_map|dict_get:ds %}Holiday: {{ holidays_map|dict_get:ds }}{% endif %}">
                         <td>{{ d.date|date:"D, d M" }}</td>
-                        <td>
-                          {% if d.week_number == 1 %}{{ r.w1_alloc_hours }}
-                          {% elif d.week_number == 2 %}{{ r.w2_alloc_hours }}
-                          {% elif d.week_number == 3 %}{{ r.w3_alloc_hours }}
-                          {% else %}{{ r.w4_alloc_hours }}
-                          {% endif %}
-                        </td>
                         <td class="existing-punch">
                           {{ daily_map|dict_get:r.allocation_id|dict_get:ds }}
                         </td>
+
                         {# WBS column #}
                         <td>
                           {% if d.is_weekend or holidays_map|dict_get:ds %}
                             <div style="text-align:center;"><em class="small-muted">N/A</em></div>
                           {% else %}
-                            <div>
+                            <div style="display:flex;justify-content:center;gap:8px;">
                               {% if r.wbs_options %}
                                 <select class="wbs-select" data-date="{{ ds }}">
                                   {% for opt in r.wbs_options %}
@@ -400,21 +438,21 @@
                           {% endif %}
                         </td>
 
-                        {# Enter punch column #}
+                        {# Enter punch column — unified wrapper so disabled inputs align identically #}
                         <td>
-                          {% if d.is_weekend or holidays_map|dict_get:ds %}
-                            <input class="input-small daily-input" type="number" disabled value="{{ daily_map|dict_get:r.allocation_id|dict_get:ds }}" />
-                          {% else %}
-                            <div>
+                          <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+                            {% if d.is_weekend or holidays_map|dict_get:ds %}
+                              <input class="input-small daily-input" type="number" disabled
+                                     value="{{ daily_map|dict_get:r.allocation_id|dict_get:ds }}" />
+                              <span class="remaining" data-remaining></span>
+                            {% else %}
                               <input class="input-small daily-input" type="number" min="0" step="0.25"
                                      value="{{ daily_map|dict_get:r.allocation_id|dict_get:ds }}"
                                      data-date="{{ ds }}" data-weeknum="{{ d.week_number }}" />
                               <span class="remaining" data-remaining></span>
-                            </div>
-                          {% endif %}
+                            {% endif %}
+                          </div>
                         </td>
-
-
                       </tr>
                       {% endwith %}
                     {% endfor %}
@@ -541,20 +579,34 @@ document.addEventListener('DOMContentLoaded', function(){
 /* ---------- DAILY view: weekly totals, weekend disabling and save control ---------- */
 
 function computeWeekSummaryForAllocation(card, weekNum){
-  // find all rows for this week inside this card
+  // gather rows for the week inside the card
   const rows = Array.from(card.querySelectorAll('tr[data-weeknum="'+weekNum+'"]'));
   if(rows.length === 0) return {alloc:0, sum:0};
-  const allocText = rows[0].cells[1].textContent.trim() || "0";
-  const alloc = parseFloat(allocText) || 0;
-  let sum = 0.0;
+
+  // preferred: read allocation value from the week-summary element data-alloc attribute
+  const weekSummary = card.querySelector('.week-summary[data-week="'+weekNum+'"]');
+  let alloc = 0;
+  if(weekSummary && weekSummary.dataset && weekSummary.dataset.alloc){
+    alloc = parseFloat(weekSummary.dataset.alloc) || 0;
+  } else {
+    // fallback: attempt to read from table cells (legacy)
+    const cellText = (rows[0].cells[1] && rows[0].cells[1].textContent) ? rows[0].cells[1].textContent.trim() : "0";
+    alloc = parseFloat(cellText) || 0;
+  }
+
+  // sum all editable daily inputs for the week
+  let sum = 0;
   rows.forEach(r=>{
     const inp = r.querySelector('input.daily-input');
     if(inp && !inp.disabled){
-      sum += parseFloat(inp.value||'0') || 0;
+      sum += parseFloat(inp.value || '0') || 0;
     }
   });
+
+  // return numbers as floats (JS) — formatting handled later when writing into DOM
   return {alloc: alloc, sum: sum};
 }
+
 
 function updateDailySummaries(){
   // iterate each alloc card
