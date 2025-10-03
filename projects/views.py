@@ -1629,24 +1629,68 @@ def my_allocations(request):
                     user_punch_map_daily.setdefault(aid, {})
                     user_punch_map_daily[aid][dstr] = Decimal(str(r.get('actual_hours') or '0.00'))
 
-    # Step 4: build rows
+
+    # Step 4: build final rows that template consumes
+    # ---------- REPLACE Step 4 rows-building block WITH THIS ----------
+    from decimal import Decimal
+
     rows = []
     for r in alloc_rows:
         aid = r['allocation_id']
-        total_hours = Decimal(str(r.get('total_hours') or '0.00'))
+        total_hours = Decimal(str(r['total_hours'] or '0.00'))
         row = {
             'allocation_id': aid,
-            'project_name': r.get('project_name') or '',
-            'domain_name': r.get('domain_name') or '',
+            'project_name': r['project_name'],
+            'domain_name': r['domain_name'],
+            # ensure numeric formatted strings so template/data-alloc never gets "None"
             'total_hours': format(total_hours, '0.2f'),
-            'wbs_options': get_wbs_options_for_iom(r['iom_id']) if r.get('iom_id') else []
         }
+
+        # attach numeric strings for w1..w4 alloc and punched
+        weeks_present = []
         for wk in range(1, 5):
             alloc_w = weekly_alloc.get(aid, {}).get(wk, {}).get('hours', Decimal('0.00'))
             punched_w = user_punch_map_week.get(aid, {}).get(wk, Decimal('0.00'))
-            row[f'w{wk}_alloc_hours'] = format(alloc_w, '0.2f')
-            row[f'w{wk}_punched_hours'] = format(punched_w, '0.2f')
+            # allocate safe Decimal -> string
+            alloc_str = format(Decimal(alloc_w), '0.2f') if alloc_w is not None else '0.00'
+            punched_str = format(Decimal(punched_w), '0.2f') if punched_w is not None else '0.00'
+            row[f'w{wk}_alloc_hours'] = alloc_str
+            row[f'w{wk}_punched_hours'] = punched_str
+            # track which weeks actually have allocation > 0
+            try:
+                if Decimal(alloc_w) > 0:
+                    weeks_present.append(wk)
+            except Exception:
+                # fallback - treat as zero
+                pass
+
+        # if no weeks have allocation, optionally include at least [] (template expects iterable)
+        row['weeks_present'] = weeks_present
+
+        # Build WBS options (seller/buyer) for this allocation's iom_id.
+        # Attempt to fetch seller/buyer WBS strings from prism_wbs
+        row['wbs_options'] = []
+        iom_id = r.get('iom_id')
+        if iom_id:
+            with connection.cursor() as cur_wbs:
+                # adjust column names if your prism_wbs uses slightly different names
+                cur_wbs.execute("""
+                    SELECT seller_wbs_cc, buyer_wbs_cc
+                    FROM prism_wbs
+                    WHERE iom_id = %s
+                    LIMIT 1
+                """, [iom_id])
+                wbs_row = cur_wbs.fetchone()
+                if wbs_row:
+                    seller = wbs_row[0]
+                    buyer = wbs_row[1]
+                    if seller:
+                        row['wbs_options'].append({'code': f'seller:{seller}', 'label': f'Seller WBS: {seller}'})
+                    if buyer:
+                        row['wbs_options'].append({'code': f'buyer:{buyer}', 'label': f'Buyer WBS: {buyer}'})
+
         rows.append(row)
+    # ---------- end replacement ----------
 
     # Step 5: daily grid (dates of month)
     daily_dates = []
@@ -1662,13 +1706,15 @@ def my_allocations(request):
         cur_day += timedelta(days=1)
 
     # Step 6: daily_map
+    # when building daily_map (after building daily_dates)
     daily_map = {}
     for r in alloc_rows:
         aid = r['allocation_id']
         daymap = {}
         for d in daily_dates:
-            s = d['iso']
-            daymap[s] = format(user_punch_map_daily.get(aid, {}).get(s, Decimal('0.00')), '0.2f')
+            s = d['iso'] if isinstance(d, dict) else d.strftime("%Y-%m-%d")
+            val = user_punch_map_daily.get(aid, {}).get(s, Decimal('0.00'))
+            daymap[s] = format(Decimal(val), '0.2f')
         daily_map[aid] = daymap
 
     # Step 7: holidays for this month
@@ -1684,8 +1730,6 @@ def my_allocations(request):
         'month_start': month_start,
         'holidays_map': holidays_map,
     })
-
-
 
 
 # ---------- save weekly punches endpoint ----------
