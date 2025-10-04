@@ -9,6 +9,8 @@ from django.contrib import messages
 from django.urls import reverse
 from django.db import connection
 from django.views.decorators.http import require_http_methods
+from django.http import HttpResponseBadRequest, JsonResponse
+from django.views.decorators.http import require_GET, require_POST
 
 import pandas as pd
 
@@ -47,9 +49,8 @@ def _param_safe(v: Any) -> Any:
     - None stays None
     - pandas NA -> None
     - datetime -> formatted string
-    - numeric-like -> string or float is fine, but we prefer string to be safe
+    - numeric-like -> numeric
     - otherwise str(v)
-    This avoids driver-level bytes-formatting errors.
     """
     try:
         import pandas as _pd
@@ -68,12 +69,15 @@ def _param_safe(v: Any) -> Any:
     except Exception:
         pass
 
-    if isinstance(v, (datetime.date, datetime.datetime)):
-        # MySQL DATETIME accepts 'YYYY-MM-DD HH:MM:SS'
-        if isinstance(v, datetime.datetime):
-            return v.strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            return v.strftime("%Y-%m-%d")
+    # datetime/date
+    try:
+        if isinstance(v, (datetime.datetime, datetime.date)):
+            if isinstance(v, datetime.datetime):
+                return v.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                return v.strftime("%Y-%m-%d")
+    except Exception:
+        pass
 
     # pandas Timestamp
     try:
@@ -111,7 +115,6 @@ def _ensure_meta_table(cursor):
 
 
 def _ensure_import_history_table(cursor):
-    # Consistent column names used in insert below
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS `{IMPORT_HISTORY}` (
             `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -233,7 +236,7 @@ def import_master(request):
         messages.error(request, "No file uploaded.")
         return redirect(reverse("settings:import_master"))
 
-    started_at = datetime.datetime.datetime.now() if False else datetime.datetime.now()
+    started_at = datetime.datetime.now()
     importer = getattr(request.user, "username", None) or "anonymous"
     filename = getattr(uploaded_file, "name", "uploaded.xlsx")
 
@@ -337,8 +340,7 @@ def import_master(request):
         messages.error(request, f"Failed to create application tables: {e}")
         return redirect(reverse("settings:import_master"))
 
-    # Step C: populate projects and prism_wbs
-    # Build mapping helpers
+    # Step C: populate projects and prism_wbs (kept same as previously)
     mapping_lookup: Dict[str, str] = {}
     col_to_orig = {}
     for orig, col in mapping:
@@ -373,15 +375,13 @@ def import_master(request):
             cursor.execute("SELECT id, name FROM projects")
             existing_projects = {row[1]: row[0] for row in cursor.fetchall()}
 
-            # Populate projects (unique by Program) and capture OEM from first occurrence
+            # Populate projects (unique by Program)
             if prog_col:
-                # gather unique program names from df and first-seen OEM
                 programs: Dict[str, Dict[str, Optional[str]]] = {}
                 for _, row in df.iterrows():
                     orig_prog = col_to_orig.get(prog_col)
                     prog_val = row.get(orig_prog) if orig_prog else None
                     if prog_val is None or (isinstance(prog_val, float) and pd.isna(prog_val)):
-                        # fallback: scan header names for a 'program' column
                         for orig_h, dbc in mapping:
                             if "program" in str(orig_h).strip().lower():
                                 prog_val = row.get(orig_h)
@@ -391,7 +391,6 @@ def import_master(request):
                     prog_name = str(prog_val).strip()
                     if prog_name == "":
                         continue
-                    # Buyer OEM (if present) -> use first non-empty per program
                     oem_val = None
                     if buyer_oem_col:
                         orig_oem = col_to_orig.get(buyer_oem_col)
@@ -402,11 +401,9 @@ def import_master(request):
                     if prog_name not in programs:
                         programs[prog_name] = {"oem_name": oem_val}
                     else:
-                        # fill if previously empty
                         if programs[prog_name].get("oem_name") in (None, "") and oem_val:
                             programs[prog_name]["oem_name"] = oem_val
 
-                # Insert projects using captured OEM
                 for p in sorted(programs.keys()):
                     if p == "":
                         continue
@@ -415,7 +412,6 @@ def import_master(request):
                     try:
                         oem_for_p = programs[p].get("oem_name")
                         cursor.execute("INSERT INTO projects (name, oem_name) VALUES (%s,%s)", [p, oem_for_p])
-                        # fetch id and cache
                         cursor.execute("SELECT id FROM projects WHERE name=%s LIMIT 1", [p])
                         res = cursor.fetchone()
                         if res:
@@ -425,13 +421,9 @@ def import_master(request):
                         errors.append(f"Failed to insert project '{p}': {e}")
 
             # Populate prism_wbs using ON DUPLICATE KEY UPDATE
-            # -----------------------------
-            # Populate prism_wbs using ON DUPLICATE KEY UPDATE (QUOTED IDENTIFIERS)
-            # -----------------------------
             def _find(orig_variants):
                 return find_col_by_variants(orig_variants)
 
-            # detect columns (same as before)
             status_col = _find(["Status", "status", "Request Status"])
             bg_code_col = _find(["BG Code", "BG_Code", "bg_code", "bg code"])
             year_col = _find(["Year", "year"])
@@ -457,13 +449,11 @@ def import_master(request):
 
             # iterate rows and upsert
             for _, row in df.iterrows():
-                # iom id extraction (same logic)
                 iom_val = None
                 if id_col:
                     orig = col_to_orig.get(id_col)
                     iom_val = row.get(orig) if orig else None
                 if iom_val is None:
-                    # fallback: try literal "id" header
                     for orig_header, dbcol in mapping:
                         if str(orig_header).strip().lower() == "id":
                             iom_val = row.get(orig_header)
@@ -472,7 +462,6 @@ def import_master(request):
                     continue
                 iom_val = str(iom_val).strip()
 
-                # project id lookup
                 project_id = None
                 if prog_col:
                     orig = col_to_orig.get(prog_col)
@@ -488,7 +477,6 @@ def import_master(request):
                         return None
                     return _param_safe(row.get(orig_h))
 
-                # collect scalar fields
                 status_val = read_val(status_col)
                 bg_code_val = read_val(bg_code_col)
                 year_val = read_val(year_col)
@@ -506,11 +494,9 @@ def import_master(request):
                 total_hours_val = read_val(total_hours_col)
                 total_fte_val = read_val(total_fte_col)
 
-                # months
                 months_hours_vals = {m: (read_val(month_hours_cols[m]) or 0) for m in months}
                 months_fte_vals = {m: (read_val(month_fte_cols[m]) or 0) for m in months}
 
-                # build ordered column list (use DB column names exactly)
                 insert_cols = [
                     "iom_id", "status", "project_id", "bg_code", "year", "seller_country",
                     "creator", "date_created", "comment_of_creator",
@@ -547,10 +533,8 @@ def import_master(request):
                     params.append(months_fte_vals.get(m, 0))
                 params.append(total_fte_val or 0)
 
-                # create sql pieces with backticks for safety
                 cols_clause = ", ".join([f"`{c}`" for c in insert_cols])
                 placeholders = ", ".join(["%s"] * len(insert_cols))
-                # IMPORTANT: quote identifiers in update clause too
                 update_clause = ",\n                          ".join(
                     [f"`{c}`=VALUES(`{c}`)" for c in insert_cols if c != "iom_id"])
 
@@ -571,8 +555,7 @@ def import_master(request):
         messages.error(request, f"Failed during projects/WBS population: {e}")
         return redirect(reverse("settings:import_master"))
 
-    # Persist import history (use column names from _ensure_import_history_table)
-    finished_at = datetime.datetime.datetime.now() if False else datetime.datetime.now()
+    finished_at = datetime.datetime.now()
     try:
         with connection.cursor() as cursor:
             cursor.execute(f"""
@@ -595,29 +578,12 @@ def import_master(request):
                 json.dumps({orig: col for orig, col in mapping})
             ])
     except Exception as e:
-        # do not abort final result if history logging fails, just warn
         messages.warning(request, f"Failed to write import history: {e}")
 
-    # Final UI messages
     messages.info(request, f"Projects created: {projects_created}.")
     messages.info(request, f"WBS inserted/updated: {wbs_inserted}, failed: {wbs_failed}.")
     if errors:
-        # If too many errors, only show count and mention import_history for details
         messages.warning(request, f"{len(errors)} errors occurred during import. Check import_history table for details.")
-
-    # Provide a small preview to the template
-    preview_headers = orig_headers
-    preview_rows = []
-    for _, row in df.head(6).iterrows():
-        row_list = []
-        for h in preview_headers:
-            v = row.get(h, "")
-            if pd.isna(v):
-                v = ""
-            else:
-                v = str(v)
-            row_list.append(v)
-        preview_rows.append(row_list)
 
     preview_headers = orig_headers
     preview_rows = []
@@ -629,109 +595,14 @@ def import_master(request):
         "preview_rows": preview_rows,
     })
 
-from django.shortcuts import render
-from django.http import JsonResponse, HttpResponseBadRequest
-from django.views.decorators.http import require_GET, require_POST
-from django.db import connection
-from datetime import datetime
-import json
 
-@require_GET
-def monthly_hours_settings(request):
-    print("[monthly_hours_settings] called")
-    try:
-        year = int(request.GET.get("year") or datetime.now().year)
-        print(f"[monthly_hours_settings] year from request: {year}")
-    except ValueError:
-        year = datetime.now().year
-        print(f"[monthly_hours_settings] invalid year, using current: {year}")
-
-    months = []
-    with connection.cursor() as cur:
-        print(f"[monthly_hours_settings] executing SELECT for year: {year}")
-        cur.execute("SELECT month, max_hours FROM monthly_hours_limit WHERE year=%s", [year])
-        rows = cur.fetchall()
-        print(f"[monthly_hours_settings] rows fetched: {rows}")
-        values = {row[0]: float(row[1]) for row in rows}
-        print(f"[monthly_hours_settings] values dict: {values}")
-
-    for m in range(1, 13):
-        val = values.get(m, 183.75)
-        print(f"[monthly_hours_settings] month: {m}, value: {val}")
-        months.append({"month": m, "value": val})
-
-    print(f"[monthly_hours_settings] months list: {months}")
-    return render(request, "settings/settings_monthly_hours.html", {"year": year, "months": months})
-
-
-@require_POST
-def save_monthly_hours(request):
-    print("[save_monthly_hours] called")
-    try:
-        data = json.loads(request.body.decode("utf-8"))
-        print(f"[save_monthly_hours] data loaded: {data}")
-        year = int(data.get("year"))
-        months = data.get("months", [])
-        print(f"[save_monthly_hours] year: {year}, months: {months}")
-    except Exception as e:
-        print(f"[save_monthly_hours] Exception parsing payload: {e}")
-        return HttpResponseBadRequest("Invalid payload")
-
-    try:
-        with connection.cursor() as cur:
-            for m in months:
-                month = int(m.get("month"))
-                value = float(m.get("value"))
-                print(f"[save_monthly_hours] inserting month: {month}, value: {value}")
-                if not (1 <= month <= 12):
-                    print(f"[save_monthly_hours] skipping invalid month: {month}")
-                    continue
-                cur.execute("""
-                    INSERT INTO monthly_hours_limit (year, month, max_hours)
-                    VALUES (%s, %s, %s)
-                    ON DUPLICATE KEY UPDATE max_hours=VALUES(max_hours), updated_at=CURRENT_TIMESTAMP
-                """, [year, month, value])
-    except Exception as ex:
-        print(f"[save_monthly_hours] Exception during DB insert: {ex}")
-        return JsonResponse({"ok": False, "error": str(ex)})
-
-    print(f"[save_monthly_hours] save successful for year: {year}")
-    return JsonResponse({"ok": True, "year": year})
-
-
-@require_GET
-def get_monthly_max(request):
-    print("[get_monthly_max] called")
-    try:
-        year = int(request.GET.get("year"))
-        month = int(request.GET.get("month"))
-        print(f"[get_monthly_max] year: {year}, month: {month}")
-    except Exception as e:
-        print(f"[get_monthly_max] Exception parsing year/month: {e}")
-        return HttpResponseBadRequest("Invalid year/month")
-
-    with connection.cursor() as cur:
-        print(f"[get_monthly_max] executing SELECT for year: {year}, month: {month}")
-        cur.execute("""
-            SELECT max_hours FROM monthly_hours_limit
-            WHERE year=%s AND month=%s
-        """, [year, month])
-        row = cur.fetchone()
-        print(f"[get_monthly_max] row fetched: {row}")
-    max_hours = float(row[0]) if row else 183.75
-    print(f"[get_monthly_max] max_hours: {max_hours}")
-
-    return JsonResponse({"ok": True, "max_hours": max_hours})
-
-from django.shortcuts import render, redirect
-from django.http import HttpResponseBadRequest
-from django.urls import reverse
-from django.db import connection
+# ---------------------- Utilities & Settings endpoints ----------------------
 
 def dictfetchall(cursor):
     """Return all rows from a cursor as a list of dicts."""
     cols = [c[0] for c in cursor.description] if cursor.description else []
     return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
 
 def holidays_list(request):
     """List holidays and provide form to add new one."""
@@ -739,6 +610,7 @@ def holidays_list(request):
         cur.execute("SELECT id, holiday_date, name FROM holidays ORDER BY holiday_date")
         holidays = dictfetchall(cur)
     return render(request, "settings/holidays.html", {"holidays": holidays})
+
 
 def holidays_add(request):
     """Add a holiday (POST)."""
@@ -752,3 +624,190 @@ def holidays_add(request):
         cur.execute("INSERT INTO holidays (holiday_date, name, created_by) VALUES (%s,%s,%s)",
                     [d, name, request.user.email if request.user.is_authenticated else None])
     return redirect(reverse("settings:settings_holidays"))
+
+
+# ----------------- Monthly Hours Settings endpoints (updated) -----------------
+
+@require_GET
+def monthly_hours_settings(request):
+    """
+    Render settings UI that shows year and months with start_date, end_date and max_hours.
+    Template: settings/settings_monthly_hours.html
+    """
+    try:
+        year = int(request.GET.get("year") or datetime.datetime.now().year)
+    except Exception:
+        year = datetime.datetime.now().year
+
+    months = []
+    with connection.cursor() as cur:
+        # fetch month, max_hours, start_date, end_date for this year
+        cur.execute("""
+            SELECT month, max_hours, start_date, end_date
+            FROM monthly_hours_limit
+            WHERE year=%s
+        """, [year])
+        rows = cur.fetchall()
+        values = {}
+        for row in rows:
+            m = int(row[0])
+            maxh = float(row[1]) if row[1] is not None else 183.75
+            sd = row[2]
+            ed = row[3]
+            # ensure they are date objects or None
+            if isinstance(sd, str):
+                try:
+                    sd = datetime.datetime.strptime(sd, "%Y-%m-%d").date()
+                except Exception:
+                    sd = None
+            if isinstance(ed, str):
+                try:
+                    ed = datetime.datetime.strptime(ed, "%Y-%m-%d").date()
+                except Exception:
+                    ed = None
+            values[m] = {"max_hours": maxh, "start_date": sd, "end_date": ed}
+
+    for m in range(1, 13):
+        entry = values.get(m)
+        if entry:
+            max_hours = entry["max_hours"]
+            sd = entry["start_date"]
+            ed = entry["end_date"]
+            sd_s = sd.strftime("%Y-%m-%d") if sd else ""
+            ed_s = ed.strftime("%Y-%m-%d") if ed else ""
+        else:
+            first = datetime.date(year, m, 1)
+            last = (first.replace(day=28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)
+            sd_s = first.strftime("%Y-%m-%d")
+            ed_s = last.strftime("%Y-%m-%d")
+            max_hours = 183.75
+
+        months.append({
+            "month": m,
+            "value": max_hours,
+            "start_date": sd_s,
+            "end_date": ed_s
+        })
+
+    return render(request, "settings/settings_monthly_hours.html", {"year": year, "months": months})
+
+
+@require_POST
+def save_monthly_hours(request):
+    """
+    Expects JSON payload:
+    { "year": 2025, "months": [ {"month":1,"value":183.75,"start_date":"2025-01-25","end_date":"2025-02-20"}, ... ] }
+    """
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        year = int(data.get("year"))
+        months = data.get("months", [])
+    except Exception as e:
+        return HttpResponseBadRequest("Invalid payload")
+
+    try:
+        with connection.cursor() as cur:
+            for m in months:
+                try:
+                    month = int(m.get("month"))
+                except Exception:
+                    continue
+                if not (1 <= month <= 12):
+                    continue
+                value = float(m.get("value") or 183.75)
+                sd_raw = m.get("start_date") or None
+                ed_raw = m.get("end_date") or None
+
+                # Robust parse_date: handle date/datetime/timestamp/strings in Y-m-d or m/d/Y
+                def parse_date(val):
+                    if val is None:
+                        return None
+                    # if already a date/datetime object
+                    if isinstance(val, (datetime.date, datetime.datetime)):
+                        return val if isinstance(val, datetime.date) else val.date()
+                    # pandas.Timestamp
+                    try:
+                        import pandas as _pd
+                        if isinstance(val, _pd.Timestamp):
+                            return val.to_pydatetime().date()
+                    except Exception:
+                        pass
+                    # string -> try common formats
+                    val_str = str(val).strip()
+                    if not val_str:
+                        return None
+                    for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
+                        try:
+                            return datetime.datetime.strptime(val_str, fmt).date()
+                        except Exception:
+                            continue
+                    # last attempt: try dateutil-ish fallback (YYYY-M-D)
+                    parts = re.split(r'[-/]', val_str)
+                    try:
+                        if len(parts) == 3:
+                            y, mo, d = parts
+                            # try detect if format is YYYY MM DD or MM DD YYYY
+                            if len(y) == 4:
+                                return datetime.date(int(y), int(mo), int(d))
+                            elif len(parts[2]) == 4:
+                                return datetime.date(int(parts[2]), int(parts[0]), int(parts[1]))
+                    except Exception:
+                        pass
+                    return None
+
+                sd = parse_date(sd_raw)
+                ed = parse_date(ed_raw)
+
+                # debug prints (keep temporarily if desired)
+                # print("Saving", year, month, value, sd_raw, ed_raw)
+                # print("Parsed", sd, ed)
+
+                cur.execute("""
+                    INSERT INTO monthly_hours_limit (year, month, start_date, end_date, max_hours)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                      start_date = VALUES(start_date),
+                      end_date = VALUES(end_date),
+                      max_hours = VALUES(max_hours),
+                      updated_at = CURRENT_TIMESTAMP
+                """, [year, month, sd, ed, value])
+    except Exception as ex:
+        return JsonResponse({"ok": False, "error": str(ex)})
+
+    return JsonResponse({"ok": True, "year": year})
+
+
+@require_GET
+def get_monthly_max(request):
+    """
+    GET params: year, month
+    Returns: {ok: True, max_hours: x, start_date: "YYYY-MM-DD", end_date: "YYYY-MM-DD"}
+    """
+    try:
+        year = int(request.GET.get("year"))
+        month = int(request.GET.get("month"))
+    except Exception:
+        return HttpResponseBadRequest("Invalid year/month")
+
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT max_hours, start_date, end_date FROM monthly_hours_limit
+            WHERE year=%s AND month=%s
+        """, [year, month])
+        row = cur.fetchone()
+
+    if row:
+        max_hours = float(row[0]) if row[0] is not None else 183.75
+        sd = row[1]
+        ed = row[2]
+    else:
+        first = datetime.date(year, month, 1)
+        last = (first.replace(day=28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)
+        sd = first
+        ed = last
+        max_hours = 183.75
+
+    sd_s = sd.strftime("%Y-%m-%d") if sd else ""
+    ed_s = ed.strftime("%Y-%m-%d") if ed else ""
+
+    return JsonResponse({"ok": True, "max_hours": max_hours, "start_date": sd_s, "end_date": ed_s})

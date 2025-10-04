@@ -326,11 +326,14 @@ class DatabaseInitializer:
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 year SMALLINT NOT NULL,
                 month TINYINT NOT NULL,
+                start_date DATE NULL,        -- billing cycle start date for this (year,month)
+                end_date DATE NULL,          -- billing cycle end date for this (year,month)
                 max_hours DECIMAL(7,2) NOT NULL DEFAULT 183.75,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 UNIQUE KEY uq_year_month (year, month)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
         """)
 
         print("Adding DDL for table: project_contacts")
@@ -427,7 +430,7 @@ class DatabaseInitializer:
               COLLATE=utf8mb4_0900_ai_ci;
         """)
         print("Prepping holidays table")
-        ddl.append("""
+        ddls.append("""
         CREATE TABLE IF NOT EXISTS `holidays` (
           `id` BIGINT NOT NULL AUTO_INCREMENT,
           `holiday_date` DATE NOT NULL,

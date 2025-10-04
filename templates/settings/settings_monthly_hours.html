@@ -5,7 +5,7 @@
 
 <div class="hours-card">
   <h1 class="page-title">Monthly Hours Limit</h1>
-  <p class="page-sub">Set the maximum allocatable hours per resource for each month in a year.</p>
+  <p class="page-sub">Set the maximum allocatable hours per resource for each month in a year. You may define a billing cycle that does not match the calendar month by setting Start Date and End Date for each month.</p>
 
   {# Render CSRF token into DOM so JS can pick it up reliably #}
   <form id="csrfForm" style="display:none;">{% csrf_token %}</form>
@@ -20,7 +20,9 @@
     <table class="hours-table">
       <thead>
         <tr>
-          <th style="width:100px">Month</th>
+          <th style="width:80px">Month</th>
+          <th style="width:160px">Start Date</th>
+          <th style="width:160px">End Date</th>
           <th>Max Hours</th>
         </tr>
       </thead>
@@ -28,6 +30,23 @@
         {% for m in months %}
         <tr>
           <td style="text-align:center; font-weight:600;">{{ m.month }}</td>
+
+          <td style="text-align:center;">
+            <input type="date"
+                   class="start-date-input"
+                   data-month="{{ m.month }}"
+                   value="{{ m.start_date }}"
+                   style="width:140px; padding:6px; border-radius:6px; border:1px solid #dcdcdc; text-align:center;">
+          </td>
+
+          <td style="text-align:center;">
+            <input type="date"
+                   class="end-date-input"
+                   data-month="{{ m.month }}"
+                   value="{{ m.end_date }}"
+                   style="width:140px; padding:6px; border-radius:6px; border:1px solid #dcdcdc; text-align:center;">
+          </td>
+
           <td style="text-align:center;">
             <input type="number"
                    class="month-input"
@@ -82,8 +101,25 @@
 
   async function doSave() {
     const year = Number(yearInput.value) || new Date().getFullYear();
-    const inputs = Array.from(document.querySelectorAll('.month-input'));
-    const months = inputs.map(i => ({ month: Number(i.dataset.month), value: Number(i.value) || 0 }));
+
+    // gather inputs
+    const months = [];
+    const monthInputs = Array.from(document.querySelectorAll('.month-input'));
+    for (const inp of monthInputs) {
+      const m = Number(inp.dataset.month);
+      const value = Number(inp.value) || 0;
+      const sdNode = document.querySelector('.start-date-input[data-month="'+m+'"]');
+      const edNode = document.querySelector('.end-date-input[data-month="'+m+'"]');
+      const start_date = sdNode ? sdNode.value : "";
+      const end_date = edNode ? edNode.value : "";
+
+      months.push({
+        month: m,
+        value: value,
+        start_date: start_date || null,
+        end_date: end_date || null
+      });
+    }
 
     // client-side basic validation
     for (const m of months) {
@@ -94,6 +130,22 @@
       if (m.value < 0) {
         showMsg('Max hours cannot be negative', false);
         return;
+      }
+      // if start/end provided, basic YYYY-MM-DD format check
+      if (m.start_date && !/^\d{4}-\d{2}-\d{2}$/.test(m.start_date)) {
+        showMsg('Invalid start date format for month ' + m.month, false);
+        return;
+      }
+      if (m.end_date && !/^\d{4}-\d{2}-\d{2}$/.test(m.end_date)) {
+        showMsg('Invalid end date format for month ' + m.month, false);
+        return;
+      }
+      // if both present, ensure start <= end
+      if (m.start_date && m.end_date) {
+        if ((new Date(m.start_date)) > (new Date(m.end_date))) {
+          showMsg('Start Date cannot be after End Date for month ' + m.month, false);
+          return;
+        }
       }
     }
 

@@ -142,6 +142,27 @@
       <div>
         <h2 id="myAllocTitle">My Allocations — {{ month_start|date:"F Y" }}</h2>
         <p class="small-muted">Toggle between Weekly and Daily punching views. You cannot punch more than the allocated hours for the week.</p>
+
+        {# NEW: Billing period summary (explicitly shown for clarity) #}
+        <div style="margin-top:8px; display:flex; gap:10px; align-items:center;">
+          <div style="font-size:13px; color:#6b7280;">Billing period:</div>
+          <div style="font-weight:700; color:#0b5ed7;">
+            {% if month_start and daily_dates %}
+              {# iterate to the last daily_dates entry to render end date robustly #}
+              {{ month_start|date:"Y-m-d" }} —
+              {% for d in daily_dates %}
+                {% if forloop.last %}
+                  {{ d.date|date:"Y-m-d" }}
+                {% endif %}
+              {% endfor %}
+            {% elif month_start %}
+              {{ month_start|date:"Y-m-d" }} — {{ month_start|date:"Y-m-t" }}
+            {% else %}
+              (not defined)
+            {% endif %}
+          </div>
+        </div>
+
       </div>
 
       <div class="page-controls" aria-label="Month controls">
@@ -453,21 +474,17 @@ function computeWeekSummaryForAllocation(card, weekNum){
   if(rows.length === 0) return {alloc:0, sum:0};
 
   // preferred: read allocation value from the week-summary element data-alloc attribute
-    // preferred: read allocation value from the week-summary element data-alloc attribute
   const weekSummary = card.querySelector('.week-summary[data-week="'+weekNum+'"]');
   let alloc = 0;
   if (weekSummary && weekSummary.dataset && typeof weekSummary.dataset.alloc !== 'undefined') {
-    // defensive parse: could be "None" or other non-numeric strings -> ensure numeric fallback 0
     const raw = weekSummary.dataset.alloc;
     const parsed = parseFloat(String(raw).replace(/[^0-9\.\-]/g, '')) ;
     alloc = (isNaN(parsed) ? 0 : parsed);
   } else {
-    // fallback: attempt to read from table cells (legacy)
     const cellText = (rows && rows[0] && rows[0].cells[1] && rows[0].cells[1].textContent) ? rows[0].cells[1].textContent.trim() : "0";
     const parsed2 = parseFloat(String(cellText).replace(/[^0-9\.\-]/g,'')) ;
     alloc = (isNaN(parsed2) ? 0 : parsed2);
   }
-
 
   // sum all editable daily inputs for the week
   let sum = 0;
@@ -478,7 +495,6 @@ function computeWeekSummaryForAllocation(card, weekNum){
     }
   });
 
-  // return numbers as floats (JS) — formatting handled later when writing into DOM
   return {alloc: alloc, sum: sum};
 }
 
