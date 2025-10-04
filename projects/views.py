@@ -1226,11 +1226,47 @@ def api_projects(request):
 # --- get_allocations_for_iom (returns saved rows for requested iom_id + month_start) ---
 @require_GET
 def get_allocations_for_iom(request):
+    """
+    Return saved allocations for an IOM for the canonical billing month.
+    Accepts either:
+      - month_start param in YYYY-MM-DD (will resolve to billing period containing that date), OR
+      - month param in YYYY-MM (preferred) — will resolve billing_start via get_billing_period.
+    """
     project_id = request.GET.get("project_id")
     iom_row_id = request.GET.get("iom_row_id")
-    month_start = request.GET.get("month_start")
-    if not (project_id and iom_row_id and month_start):
+    # accept month (YYYY-MM) or month_start (date string)
+    month_param = request.GET.get("month")  # YYYY-MM
+    month_start_param = request.GET.get("month_start")  # YYYY-MM-DD
+
+    if not (project_id and iom_row_id):
         return JsonResponse({"ok": False, "error": "missing params"}, status=400)
+
+    # determine canonical billing_start date to query monthly_allocation_entries
+    billing_start = None
+    try:
+        if month_param:
+            year, mon = map(int, month_param.split("-"))
+            billing_start, _ = get_billing_period(year, mon)
+        elif month_start_param:
+            # if month_start_param corresponds to a billing window, use that window's start, else use date as-is
+            try:
+                dt = datetime.strptime(month_start_param, "%Y-%m-%d").date()
+            except Exception:
+                dt = None
+            if dt:
+                # find billing period containing dt (if any); fallback to dt.replace(day=1)
+                try:
+                    bs, be = get_billing_period_for_date(dt)
+                    billing_start = bs
+                except Exception:
+                    billing_start = dt.replace(day=1)
+        else:
+            # fallback to current month's billing start
+            today = date.today()
+            billing_start, _ = get_billing_period(today.year, today.month)
+    except Exception as exc:
+        logger.exception("get_allocations_for_iom: failed to resolve billing_start: %s", exc)
+        return JsonResponse({"ok": False, "error": "Invalid month parameter"}, status=400)
 
     try:
         with connection.cursor() as cur:
@@ -1238,70 +1274,197 @@ def get_allocations_for_iom(request):
                 SELECT user_ldap, total_hours
                 FROM monthly_allocation_entries
                 WHERE project_id=%s AND iom_id=%s AND month_start=%s
-            """, (project_id, iom_row_id, month_start))
+            """, (project_id, iom_row_id, billing_start))
             rows = cur.fetchall() or []
     except Exception as exc:
         logger.exception("get_allocations_for_iom failed: %s", exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
     saved_items = [{"user_ldap": r[0], "total_hours": float(r[1] or 0)} for r in rows]
-    return JsonResponse({"ok": True, "saved_items": saved_items})
+    return JsonResponse({"ok": True, "saved_items": saved_items, "billing_start": billing_start.strftime("%Y-%m-%d")})
+
 
 @require_POST
 def save_monthly_allocations(request):
-    """Save or update monthly allocation entries, using billing cycle start_date as canonical month_start."""
+    """
+    Save or update monthly allocation entries, using billing cycle start_date as canonical month_start.
+
+    Accepts JSON payload (preferred) or standard form POST.
+
+    JSON examples (both supported):
+      { "project_id": 46, "month": "2025-08", "items": [ {"iom_id":"PEU_...", "user_ldap":"x@y", "total_hours":183.75}, ... ] }
+
+      or
+
+      { "project_id": 46, "month_start": "2025-07-21", "items": [ ... ] }
+
+    Legacy/form support:
+      - form fields project_id, month (YYYY-MM) OR year+month_num
+      - or a JSON string in items_json field
+      - or patterned POST fields iom_id1,user_ldap1,hours1, etc.
+    """
     try:
-        data = json.loads(request.body.decode("utf-8"))
-        project_id = data.get("project_id")
-        items = data.get("items", [])
-        month_str = data.get("month")  # YYYY-MM
-        if not (project_id and month_str):
-            return JsonResponse({"ok": False, "error": "Missing project_id or month"}, status=400)
+        # Read body and attempt JSON
+        body_raw = request.body.decode("utf-8").strip()
+        data = {}
+        if body_raw:
+            try:
+                data = json.loads(body_raw)
+            except Exception:
+                data = {}
 
-        year, month = map(int, month_str.split("-"))
-        billing_start, billing_end = get_billing_period(year, month)
+        # Primary inputs
+        project_id = data.get("project_id") or request.POST.get("project_id") or request.GET.get("project_id")
+        month_param = data.get("month") or request.POST.get("month") or request.GET.get("month")  # expected "YYYY-MM"
+        month_start_param = data.get("month_start") or request.POST.get("month_start") or request.GET.get("month_start")  # expected "YYYY-MM-DD"
 
+        # Allow year + month numeric fallback
+        if not month_param:
+            year_f = request.POST.get("year") or request.GET.get("year") or data.get("year")
+            mon_f = request.POST.get("month_num") or request.POST.get("mon") or request.GET.get("month_num") or data.get("month_num")
+            if year_f and mon_f:
+                try:
+                    month_param = f"{int(year_f):04d}-{int(mon_f):02d}"
+                except Exception:
+                    month_param = None
+
+        # If still missing, see if items_json contains month/project info
+        if (not project_id or (not month_param and not month_start_param)) and (data.get("items") or data.get("items_json") or request.POST.get("items_json")):
+            try:
+                items_blob = data.get("items") or data.get("items_json") or request.POST.get("items_json")
+                if isinstance(items_blob, str):
+                    parsed_blob = json.loads(items_blob)
+                else:
+                    parsed_blob = items_blob
+                if isinstance(parsed_blob, dict):
+                    project_id = project_id or parsed_blob.get("project_id")
+                    month_param = month_param or parsed_blob.get("month")
+                    month_start_param = month_start_param or parsed_blob.get("month_start")
+            except Exception:
+                pass
+
+        # minimal validation
+        if not project_id or (not month_param and not month_start_param):
+            logger.warning("save_monthly_allocations missing project or month; data_keys=%s POST_keys=%s body_len=%d",
+                           list(data.keys()) if isinstance(data, dict) else None,
+                           list(request.POST.keys()), len(body_raw))
+            return JsonResponse({"ok": False, "error": "Missing project_id or month/month_start"}, status=400)
+
+        # coerce project_id
+        try:
+            project_id = int(project_id)
+        except Exception:
+            return JsonResponse({"ok": False, "error": "Invalid project_id"}, status=400)
+
+        # Resolve canonical billing_start & billing_end (single source of truth)
+        billing_start = None
+        billing_end = None
+        if month_start_param:
+            # parse provided date and then map to billing period that contains that date
+            try:
+                dt = datetime.strptime(str(month_start_param), "%Y-%m-%d").date()
+                bs, be = get_billing_period_for_date(dt)
+                billing_start, billing_end = bs, be
+            except Exception:
+                # fallback: try parse ignoring time portion
+                try:
+                    # attempt to parse more liberal formats
+                    dt_try = datetime.strptime(str(month_start_param).split(" ")[0], "%Y-%m-%d").date()
+                    bs, be = get_billing_period_for_date(dt_try)
+                    billing_start, billing_end = bs, be
+                except Exception:
+                    return JsonResponse({"ok": False, "error": "Invalid month_start format (expected YYYY-MM-DD)"}, status=400)
+        else:
+            # month_param expected "YYYY-MM"
+            try:
+                year, mon = map(int, str(month_param).split("-"))
+                billing_start, billing_end = get_billing_period(year, mon)
+            except Exception:
+                return JsonResponse({"ok": False, "error": "Invalid month format (expected YYYY-MM)"}, status=400)
+
+        # Build items list
+        items = []
+        if isinstance(data.get("items"), list):
+            items = data.get("items")
+        else:
+            items_json_field = data.get("items_json") or request.POST.get("items_json")
+            if items_json_field:
+                try:
+                    if isinstance(items_json_field, str):
+                        items = json.loads(items_json_field)
+                    else:
+                        items = items_json_field
+                except Exception:
+                    items = []
+
+            # patterned form extraction (iom_id1,user_ldap1,hours1)
+            if not items:
+                # find keys that look like iom_id{n}
+                iom_keys = [k for k in request.POST.keys() if k.startswith("iom_id")]
+                if iom_keys:
+                    suffixes = set()
+                    for k in iom_keys:
+                        s = k.replace("iom_id", "").strip("_")
+                        suffixes.add(s)
+                    for s in suffixes:
+                        iom = request.POST.get(f"iom_id{s}")
+                        user_ldap = request.POST.get(f"user_ldap{s}") or request.POST.get(f"resource{s}")
+                        hours = request.POST.get(f"hours{s}") or request.POST.get(f"total_hours{s}")
+                        if iom and user_ldap:
+                            try:
+                                hrs = float(hours) if hours not in (None, "") else 0.0
+                            except Exception:
+                                hrs = 0.0
+                            items.append({"iom_id": iom, "user_ldap": user_ldap, "total_hours": hrs})
+
+        if not items:
+            return JsonResponse({"ok": False, "error": "No allocation items provided"}, status=400)
+
+        # Normalize & group by iom_id
         grouped = {}
         for it in items:
-            iom_id = it.get("iom_id")
-            ldap = (it.get("user_ldap") or "").strip()
+            iom_id = (it.get("iom_id") or it.get("iom") or "").strip()
+            user_ldap = (it.get("user_ldap") or it.get("user") or it.get("resource") or "").strip()
+            if not iom_id or not user_ldap:
+                continue
             try:
-                hrs_raw = it.get("total_hours")
-                hrs = float(hrs_raw)
-                hrs = float(f"{hrs:.2f}")
+                hrs_raw = it.get("total_hours", it.get("hours", 0))
+                hrs = float(hrs_raw) if hrs_raw not in (None, "") else 0.0
             except Exception:
-                continue
-            if not iom_id or not ldap or hrs <= 0:
-                continue
-            grouped.setdefault(iom_id, []).append((ldap, hrs))
+                hrs = 0.0
+            grouped.setdefault(iom_id, []).append((user_ldap, round(float(hrs), 2)))
+
+        if not grouped:
+            return JsonResponse({"ok": False, "error": "No valid allocation rows found"}, status=400)
 
         saved = {}
         with transaction.atomic():
             with connection.cursor() as cur:
                 for iom_id, rows in grouped.items():
-                    # delete old entries for same billing month
+                    # Delete previous entries for this project/iom and canonical billing_start
                     cur.execute("""
                         DELETE FROM monthly_allocation_entries
-                        WHERE project_id=%s AND iom_id=%s AND month_start=%s
-                    """, (project_id, iom_id, billing_start))
+                        WHERE project_id = %s AND iom_id = %s AND month_start = %s
+                    """, [project_id, iom_id, billing_start])
 
-                    # insert new entries with billing start_date
+                    # Insert new entries using canonical billing_start
                     for ldap, hrs in rows:
                         cur.execute("""
                             INSERT INTO monthly_allocation_entries
                             (project_id, iom_id, month_start, user_ldap, total_hours, created_at)
                             VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        """, (project_id, iom_id, billing_start, ldap, hrs))
+                        """, [project_id, iom_id, billing_start, ldap, str(float(hrs))])
 
-                    # read back
+                    # read back saved rows for reporting
                     cur.execute("""
                         SELECT user_ldap, total_hours
                         FROM monthly_allocation_entries
-                        WHERE project_id=%s AND iom_id=%s AND month_start=%s
-                    """, (project_id, iom_id, billing_start))
+                        WHERE project_id = %s AND iom_id = %s AND month_start = %s
+                    """, [project_id, iom_id, billing_start])
                     fetched = cur.fetchall()
                     saved[iom_id] = [{"user_ldap": r[0], "total_hours": float(r[1] or 0)} for r in fetched]
 
+        # Return canonical billing_start/billing_end so UI knows what server used
         return JsonResponse({
             "ok": True,
             "billing_start": billing_start.strftime("%Y-%m-%d"),
@@ -1378,60 +1541,58 @@ def is_pdl_user(ldap_entry):
 
 def team_allocations(request):
     """
-    Team Allocation page for manager/PDL:
-    - lists allocations for direct reportees (from LDAP using session creds)
-    - also includes the manager's own allocation rows if manager is PDL
-    - attaches weekly allocations (w1..w4 + status) to each row
+    Team Allocation page (billing-period aware). Uses get_billing_period(year, month)
+    when `month` query param provided (YYYY-MM). If no monthly_hours_limit entry exists
+    it falls back to calendar month. Builds rows from monthly_allocation_entries where
+    mae.month_start = billing_start (canonical).
     """
     # SINGLE source of truth for LDAP username/password from session
     session_ldap = request.session.get("ldap_username")
     session_pwd = request.session.get("ldap_password")
-    print("team_allocations - session_ldap: ", session_ldap)
+    logger.debug("team_allocations - session_ldap: %s", session_ldap)
 
     # require login
     if not session_ldap or not session_pwd:
         return redirect("accounts:login")
     creds = (session_ldap, session_pwd)
-    from datetime import date
-    # --- month_start param parsing ------------------------------------------------
+
+    # --- month param parsing (use YYYY-MM) ---
     month_str = request.GET.get("month")
     if month_str:
         try:
-            month_start = datetime.strptime(month_str + "-01", "%Y-%m-%d").date()
+            year, mon = map(int, month_str.split("-"))
+            month_start, month_end = get_billing_period(year, mon)
         except Exception:
             logger.exception("team_allocations: invalid month param '%s'", month_str)
-            month_start = date.today().replace(day=1)
+            today = date.today()
+            month_start, month_end = get_billing_period(today.year, today.month)
+
     else:
-        month_start = date.today().replace(day=1)
+        # default - current month billing period fallback
+        today = date.today()
+        month_start, month_end = get_billing_period(today.year, today.month)
 
     # --- get LDAP user entry -----------------------------------------------------
     user_entry = get_user_entry_by_username(session_ldap, username_password_for_conn=creds)
     if not user_entry:
-        print("team_allocations: user_entry not found for :", session_ldap)
+        logger.warning("team_allocations: user_entry not found for %s", session_ldap)
         return redirect("accounts:login")
 
     # --- get reportees via LDAP --------------------------------------------------
     reportees_entries = get_reportees_for_user_dn(getattr(user_entry, "entry_dn", None),
                                                  username_password_for_conn=creds) or []
-    print("team_allocations: found %d reportees for %s", len(reportees_entries), session_ldap)
-    # canonicalize reportees to login identifiers: prefer userPrincipalName then mail
     reportees_ldaps = []
     for ent in reportees_entries:
-        # ent may be dict-like or LDAP entry object: try both access patterns
         val = None
         if isinstance(ent, dict):
             val = ent.get("userPrincipalName") or ent.get("mail") or ent.get("userid") or ent.get("sAMAccountName")
         else:
-            # object-like: try attribute access
             for attr in ("userPrincipalName", "mail", "sAMAccountName", "uid"):
                 val = getattr(ent, attr, None) or val
         if val:
-            try:
-                reportees_ldaps.append(val.strip())
-            except Exception:
-                reportees_ldaps.append(str(val))
+            reportees_ldaps.append(str(val).strip())
 
-    # If logged in user is PDL, include them as well (single source: session_ldap)
+    # include manager themselves if PDL
     try:
         if is_pdl_user(user_entry):
             if session_ldap not in reportees_ldaps:
@@ -1440,12 +1601,8 @@ def team_allocations(request):
     except Exception:
         logger.exception("team_allocations: error checking PDL role for %s", session_ldap)
 
-    print("team_allocations: reportees_ldaps :", reportees_ldaps)
-
-    # --- fetch allocation rows for these reportees for the selected month -----------
     rows = []
     if reportees_ldaps:
-        # use monthly_allocation_entries as canonical allocation source
         in_clause, in_params = _sql_in_clause(reportees_ldaps)
         sql = f"""
             SELECT mae.id AS item_id,
@@ -1468,14 +1625,14 @@ def team_allocations(request):
             with connection.cursor() as cur:
                 cur.execute(sql, params)
                 rows = dictfetchall(cur) or []
-                print("team_allocations: fetched %d allocation rows (from monthly_allocation_entries)" % len(rows))
+                logger.debug("team_allocations: fetched %d allocation rows", len(rows))
         except Exception as exc:
             logger.exception("team_allocations: DB query failed: %s", exc)
             rows = []
     else:
-        print("team_allocations: no reportees to fetch for %s", session_ldap)
+        logger.debug("team_allocations: no reportees to fetch for %s", session_ldap)
 
-    # --- merge/deduplicate (if needed) -------------------------------------------
+    # deduplicate and attach weekly allocations as before (existing code)
     dedup = {}
     for r in rows:
         key = r.get("item_id") or (r.get("allocation_id"), r.get("user_ldap"), r.get("project_name"))
@@ -1483,7 +1640,6 @@ def team_allocations(request):
             dedup[key] = r
     all_rows = list(dedup.values())
 
-    # --- fetch weekly allocations for all allocation_ids --------------------------
     allocation_ids = list({r["allocation_id"] for r in all_rows if r.get("allocation_id")})
     weekly_map = {}
     if allocation_ids:
@@ -1500,10 +1656,8 @@ def team_allocations(request):
                     try:
                         alloc = r.get("allocation_id")
                         wk = int(r.get("week_number") or 0)
-                        # keep percent as float and hours as string/float with 2 decimals
                         pct = float(r.get("percent") or 0.0)
                         hrs_raw = r.get("hours") or 0.0
-                        # convert hours to float preserving decimals
                         try:
                             hrs = float(hrs_raw)
                         except Exception:
@@ -1518,13 +1672,10 @@ def team_allocations(request):
             logger.exception("team_allocations: weekly allocations query failed: %s", exc)
             weekly_map = {}
 
-    print("team_allocations: weekly_map keys:", list(weekly_map.keys()))
-
-    # --- attach weekly attrs and compute display_name ----------------------------
+    # attach weekly attrs and compute display_name
     for r in all_rows:
         aid = r.get("allocation_id")
         wk = weekly_map.get(aid, {})
-        # For UI we want percent in the inputs (so managers edit percentages)
         r["w1"] = wk.get(1, {}).get("percent", 0)
         r["w2"] = wk.get(2, {}).get("percent", 0)
         r["w3"] = wk.get(3, {}).get("percent", 0)
@@ -1539,18 +1690,8 @@ def team_allocations(request):
             display += f" <{r['email']}>"
         r["display_name"] = display
 
-    # debug prints (optional; rely on logger in production)
-    print("team_allocations: all_rows count=%d", len(all_rows))
-    print("team_allocations: weekly_map keys=%s", list(weekly_map.keys()))
-    #print context variables for debugging
-
-
-    print("all rows :",all_rows)
-    print("all weekly_map :",weekly_map)
-
-    # --- compute reportees with no allocations for the selected month ----------------
-    allocated_ldaps = {(r.get("user_ldap") or "").strip().lower() for r in all_rows if
-                       (r.get("user_ldap") or "").strip()}
+    # Determine reportees with no allocations
+    allocated_ldaps = {(r.get("user_ldap") or "").strip().lower() for r in all_rows if (r.get("user_ldap") or "").strip()}
     reportees_no_alloc = []
     try:
         for ld in reportees_ldaps:
@@ -1558,10 +1699,8 @@ def team_allocations(request):
             if not key:
                 continue
             if key.lower() not in allocated_ldaps:
-                # try to show a friendly display name from local ldap directory (if available)
                 local = _get_local_ldap_entry(key)
-                display_name = local.get("cn") if local and local.get("cn") else (
-                    local.get("username") if local else "")
+                display_name = local.get("cn") if local and local.get("cn") else (local.get("username") if local else "")
                 email_val = local.get("email") if local and local.get("email") else (key if "@" in key else "")
                 reportees_no_alloc.append({
                     "ldap": key,
@@ -1572,9 +1711,6 @@ def team_allocations(request):
         logger.exception("team_allocations: error building reportees_no_alloc")
         reportees_no_alloc = []
 
-    # debug prints (optional)
-    print("reportees_no_alloc count:", len(reportees_no_alloc))
-
     return render(request, "projects/team_allocations.html", {
         "rows": all_rows,
         "weekly_map": weekly_map,
@@ -1582,6 +1718,7 @@ def team_allocations(request):
         "reportees": reportees_ldaps,
         "reportees_no_alloc": reportees_no_alloc,
     })
+
 
 
 # -------------------------
@@ -2106,21 +2243,27 @@ def _get_user_projects_for_allocations(request):
 
 def monthly_allocations(request):
     """
-    Render the monthly allocations page and populate the projects dropdown.
-    Uses _get_user_projects_for_allocations so PDL matching is consistent with other pages.
+    Render monthly allocations page (billing-period aware). Accepts ?month=YYYY-MM
+    and uses billing_start resolved via get_billing_period(year, month).
     """
-    print("monthly_allocations called")
+    logger.debug("monthly_allocations called")
     session_ldap = request.session.get("ldap_username")
-    # default month_start as first of month (template uses simple controls)
-    from datetime import date
+
+    # Parse month param (YYYY-MM) -> billing_start
     month_str = request.GET.get("month")
     if month_str:
         try:
-            month_start = datetime.strptime(month_str + "-01", "%Y-%m-%d").date()
+            year, mon = map(int, month_str.split("-"))
+            month_start, month_end = get_billing_period(year, mon)
         except Exception:
-            month_start = date.today().replace(day=1)
+            logger.exception("monthly_allocations: invalid month param '%s'", month_str)
+            from datetime import date
+            today = date.today();
+            month_start, month_end = get_billing_period(today.year, today.month)
     else:
-        month_start = date.today().replace(day=1)
+        from datetime import date
+        today = date.today()
+        month_start, month_end = get_billing_period(today.year, today.month)
 
     project_id_param = request.GET.get("project_id")
     try:
@@ -2128,13 +2271,11 @@ def monthly_allocations(request):
     except Exception:
         active_project_id = 0
 
-    # --- fetch projects using corrected helper (pdl_user_id is a string in your DB) ---
+    # Fetch projects user can allocate for
     projects = _get_user_projects_for_allocations(request)
-
     if not active_project_id and projects:
         active_project_id = projects[0].get("id", 0)
 
-    # If there is no project available, render page with an empty list (template will show "No projects assigned")
     if not active_project_id:
         return render(request, "projects/monthly_allocations.html", {
             "projects": projects,
@@ -2149,7 +2290,7 @@ def monthly_allocations(request):
             "now": datetime.now(),
         })
 
-    # --- existing logic for fetching COEs, domains, allocations etc. ---
+    # Fetch COEs and domains
     try:
         with connection.cursor() as cur:
             cur.execute("SELECT id, name FROM coes ORDER BY name")
@@ -2157,10 +2298,8 @@ def monthly_allocations(request):
     except Exception:
         logger.exception("Error fetching COEs")
         coes = []
-
     coe_ids = [c["id"] for c in coes] if coes else []
 
-    # domains grouped by coe
     domains_map = {}
     if coe_ids:
         try:
@@ -2173,7 +2312,7 @@ def monthly_allocations(request):
             logger.exception("Error fetching domains")
             domains_map = {}
 
-    # fetch allocation_items for this project/month
+    # fetch allocation_items for this project/billing_start (canonical)
     allocation_map = {}
     capacity_accumulator = {}
     allocation_ids = []
@@ -2200,7 +2339,6 @@ def monthly_allocations(request):
         for it in items:
             coe_id = it.get("coe_id") or 0
             ldap_val = (it.get("user_ldap") or "").strip()
-            # preserve fractional hours (use float, 2-decimal rounding)
             try:
                 total_hours = round(float(it.get("total_hours") or 0.0), 2)
             except Exception:
@@ -2220,7 +2358,6 @@ def monthly_allocations(request):
             })
             if ldap_val:
                 key = ldap_val.lower()
-                # accumulate using floats and round to 2 decimals
                 capacity_accumulator[key] = round(capacity_accumulator.get(key, 0.0) + total_hours, 2)
             aid = it.get("allocation_id")
             if aid and aid not in allocation_ids:
@@ -2232,7 +2369,7 @@ def monthly_allocations(request):
         capacity_accumulator = {}
         allocation_ids = []
 
-    # weekly allocations attach
+    # weekly allocations attach (unchanged)
     weekly_map = {}
     if allocation_ids:
         try:
@@ -2253,7 +2390,6 @@ def monthly_allocations(request):
             logger.exception("Error fetching weekly_allocations")
             weekly_map = {}
 
-        # attach
         for coe_id, items in allocation_map.items():
             for it in items:
                 aid = it["allocation_id"]
@@ -2262,19 +2398,17 @@ def monthly_allocations(request):
                 it["w2"] = wk.get(2, {}).get("percent", 0)
                 it["w3"] = wk.get(3, {}).get("percent", 0)
                 it["w4"] = wk.get(4, {}).get("percent", 0)
-
                 it["s1"] = wk.get(1, {}).get("status", "")
                 it["s2"] = wk.get(2, {}).get("status", "")
                 it["s3"] = wk.get(3, {}).get("status", "")
                 it["s4"] = wk.get(4, {}).get("status", "")
 
-    # capacity map
     capacity_map = {}
     for ldap_key, allocated in capacity_accumulator.items():
-        # preserve fractional hours; remaining uses configured HOURS_AVAILABLE_PER_MONTH as fallback
         remaining = round(max(0.0, float(HOURS_AVAILABLE_PER_MONTH) - float(allocated)), 2)
         capacity_map[ldap_key] = {"allocated": round(float(allocated), 2), "remaining": remaining}
 
+    # ensure every user in allocation_items has an entry in capacity_map
     try:
         with connection.cursor() as cur:
             cur.execute("""
@@ -2290,9 +2424,7 @@ def monthly_allocations(request):
                     capacity_map[key] = {"allocated": 0, "remaining": HOURS_AVAILABLE_PER_MONTH}
     except Exception:
         pass
-    print("projects :",projects)
-    print("allocation_map :",allocation_map)
-    print("capacity_map :",capacity_map)
+
     return render(request, "projects/monthly_allocations.html", {
         "projects": projects,
         "active_project_id": active_project_id,
@@ -2305,6 +2437,7 @@ def monthly_allocations(request):
         "weekly_map": weekly_map,
         "now": datetime.now(),
     })
+
 
 # Implement _get_month_hours_limit used above
 def _get_month_hours_limit(year, month):
@@ -2461,13 +2594,14 @@ def get_iom_details(request):
             cols = [c[0] for c in cur.description]
             rec = dict(zip(cols, row))
 
-            month_start = f"{year}-{str(month).zfill(2)}-01"
+            # Use canonical billing start for this year/month
+            billing_start, billing_end = get_billing_period(year, month)
 
-            # compute used hours for this IOM from monthly_allocation_entries (this table is used by UI)
+            # compute used hours for this IOM from monthly_allocation_entries using canonical month_start
             cur.execute("""
                 SELECT COALESCE(SUM(total_hours),0) FROM monthly_allocation_entries
                 WHERE project_id=%s AND iom_id=%s AND month_start=%s
-            """, [project_id, rec.get("iom_id"), month_start])
+            """, [project_id, rec.get("iom_id"), billing_start])
             used_hours = cur.fetchone()[0] or 0.0
 
     except Exception as ex:
@@ -2475,15 +2609,11 @@ def get_iom_details(request):
         return JsonResponse({"ok": False, "error": str(ex)}, status=500)
 
     month_hours = float(rec.get("month_hours") or 0.0)
-    # Use DB-driven month_limit
     month_limit = _get_month_hours_limit(year, month)
-    # compute authoritative month_fte according to your formula (month_hours / month_limit)
     month_fte = round((month_hours / month_limit) if month_limit > 0 else 0.0, 2)
 
     remaining_hours = max(0.0, month_hours - float(used_hours))
     remaining_hours = round(remaining_hours, 2)
-
-    # compute remaining_fte measured as remaining_hours / monthly limit (DB-driven)
     remaining_fte = round((remaining_hours / month_limit) if month_limit > 0 else 0.0, 2)
 
     resp = {
@@ -2494,7 +2624,6 @@ def get_iom_details(request):
             "department": rec.get("department"),
             "site": rec.get("site"),
             "function": rec.get("function"),
-            # provide computed month_fte (2 decimal), and month_hours (2-decimal)
             "month_fte": float(month_fte),
             "month_hours": float(round(month_hours, 2)),
             "total_fte": float(rec.get("total_fte") or 0),
@@ -2504,17 +2633,51 @@ def get_iom_details(request):
             "remaining_hours": float(remaining_hours),
             "remaining_fte": float(remaining_fte),
             "month_limit": float(month_limit),
+            "billing_start": billing_start,
+            "billing_end": billing_end,
         }
     }
 
     return JsonResponse(resp)
 
-@require_GET
 def export_allocations(request):
+    """
+    Export allocations for an IOM and billing month. Accepts:
+      - project_id, iom_id, and either month=YYYY-MM (preferred) OR month_start=YYYY-MM-DD
+    """
     project_id = request.GET.get("project_id")
     iom_id = request.GET.get("iom_id")
-    month_start = request.GET.get("month_start")
+    month_param = request.GET.get("month")  # YYYY-MM
+    month_start_param = request.GET.get("month_start")
 
+    if not (project_id and iom_id):
+        return HttpResponseBadRequest("project_id and iom_id required")
+
+    # resolve canonical billing_start based on month param or month_start
+    billing_start = None
+    if month_param:
+        try:
+            year, mon = map(int, month_param.split("-"))
+            billing_start, billing_end = get_billing_period(year, mon)
+        except Exception:
+            logger.exception("export_allocations: invalid month param %s", month_param)
+            from datetime import date
+            billing_start = date.today().replace(day=1)
+    elif month_start_param:
+        try:
+            dt = datetime.strptime(month_start_param, "%Y-%m-%d").date()
+            # find billing period containing dt; if not found fallback to dt.replace(day=1)
+            try:
+                billing_start, billing_end = get_billing_period_for_date(dt)
+            except Exception:
+                billing_start = dt.replace(day=1)
+        except Exception:
+            billing_start = date.today().replace(day=1)
+    else:
+        today = date.today()
+        billing_start, billing_end = get_billing_period(today.year, today.month)
+
+    # fetch iom basic details
     iom = None
     with connection.cursor() as cur:
         cur.execute("""
@@ -2540,10 +2703,10 @@ def export_allocations(request):
             SELECT user_ldap, total_hours
             FROM monthly_allocation_entries
             WHERE project_id=%s AND iom_id=%s AND month_start=%s
-        """, [project_id, iom_id, month_start])
+        """, [project_id, iom_id, billing_start])
         allocations = cur.fetchall() or []
 
-    # Build nicely formatted excel (openpyxl) - keep existing styling you had, with slight enhancements:
+    # Build excel as before
     wb = Workbook()
     ws = wb.active
     ws.title = "Allocations"
@@ -2560,7 +2723,6 @@ def export_allocations(request):
                     top=Side(style="thin"), bottom=Side(style="thin"))
 
     row_idx = 1
-    # Title
     ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=3)
     title_cell = ws.cell(row=row_idx, column=1, value="IOM Allocation Report")
     title_cell.font = Font(name="Calibri", bold=True, size=14, color="FFFFFF")
@@ -2586,12 +2748,10 @@ def export_allocations(request):
             row_idx += 1
         row_idx += 1
 
-    # Allocations header
     ws.cell(row=row_idx, column=1, value="Resource (LDAP)").font = header_font
     ws.cell(row=row_idx, column=1).fill = fill_blue
     ws.cell(row=row_idx, column=1).alignment = center
     ws.cell(row=row_idx, column=1).border = border
-
     ws.cell(row=row_idx, column=2, value="Total Hours").font = header_font
     ws.cell(row=row_idx, column=2).fill = fill_blue
     ws.cell(row=row_idx, column=2).alignment = center
@@ -2602,13 +2762,11 @@ def export_allocations(request):
         ws.cell(row=row_idx, column=1, value=alloc[0]).font = normal_font
         ws.cell(row=row_idx, column=1).alignment = left
         ws.cell(row=row_idx, column=1).border = border
-
         ws.cell(row=row_idx, column=2, value=float(alloc[1] or 0)).font = normal_font
         ws.cell(row=row_idx, column=2).alignment = right
         ws.cell(row=row_idx, column=2).border = border
         row_idx += 1
 
-    # Auto-fit columns (simple heuristic)
     for idx, col in enumerate(ws.columns, 1):
         max_length = 0
         col_letter = get_column_letter(idx)
@@ -2621,10 +2779,11 @@ def export_allocations(request):
         ws.column_dimensions[col_letter].width = max_length + 4
 
     response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    filename = f"allocations_{iom_id}_{month_start}.xlsx"
+    filename = f"allocations_{iom_id}_{billing_start}.xlsx"
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     wb.save(response)
     return response
+
 
 def export_my_punches_pdf(request):
     """
