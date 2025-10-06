@@ -152,6 +152,9 @@ def _get_billing_period_for_year_month(year: int, month: int):
     Query monthly_hours_limit for the given year & month.
     If start_date and end_date exist (non-null), return (start_date, end_date) as date objects.
     Otherwise return the calendar month first..last day tuple.
+
+    This function avoids calling get_month_start_and_end directly and ensures the
+    canonical billing period (if present) is used.
     """
     try:
         with connection.cursor() as cur:
@@ -164,37 +167,45 @@ def _get_billing_period_for_year_month(year: int, month: int):
             row = cur.fetchone()
             if row:
                 sd_raw, ed_raw = row[0], row[1]
-                # Accept strings or date objects from driver; convert if string
                 sd = None
                 ed = None
+                # Accept DB date objects or strings
                 if sd_raw:
                     if isinstance(sd_raw, date):
                         sd = sd_raw
                     else:
                         try:
-                            sd = datetime.strptime(str(sd_raw), "%Y-%m-%d").date()
+                            sd = datetime.strptime(str(sd_raw).split(" ")[0], "%Y-%m-%d").date()
                         except Exception:
-                            try:
-                                sd = datetime.strptime(str(sd_raw), "%Y-%m-%d %H:%M:%S").date()
-                            except Exception:
-                                sd = None
+                            sd = None
                 if ed_raw:
                     if isinstance(ed_raw, date):
                         ed = ed_raw
                     else:
                         try:
-                            ed = datetime.strptime(str(ed_raw), "%Y-%m-%d").date()
+                            ed = datetime.strptime(str(ed_raw).split(" ")[0], "%Y-%m-%d").date()
                         except Exception:
-                            try:
-                                ed = datetime.strptime(str(ed_raw), "%Y-%m-%d %H:%M:%S").date()
-                            except Exception:
-                                ed = None
+                            ed = None
                 if sd and ed:
                     return sd, ed
     except Exception:
         logger.exception("_get_billing_period_for_year_month db error")
     # fallback to calendar month
-    return get_month_start_and_end(f"{int(year)}-{str(month).zfill(2)}")
+    try:
+        # reuse the simple calendar month computation already present in get_month_start_and_end
+        if isinstance(year, int) and isinstance(month, int):
+            start = date(year, month, 1)
+            next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            end = next_month - timedelta(days=1)
+            return start, end
+    except Exception:
+        pass
+    # as a final fallback, return today's month
+    today = date.today()
+    s = today.replace(day=1)
+    nm = (s.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return s, (nm - timedelta(days=1))
+
 
 def get_billing_period_for_date(punch_date: date):
     """Find which billing cycle a given date falls into."""
@@ -218,11 +229,10 @@ def _find_billing_period_for_date(d: date):
     """
     Find a billing period (start_date, end_date) that contains the given date d by scanning
     monthly_hours_limit rows where start_date and end_date are not null. If found return that period.
-    Otherwise fallback to calendar month containing d.
+    Otherwise fallback to the calendar month containing d.
     """
     try:
         with connection.cursor() as cur:
-            # We assume start_date and end_date are DATE columns
             cur.execute("""
                 SELECT start_date, end_date, year, month
                 FROM monthly_hours_limit
@@ -233,33 +243,55 @@ def _find_billing_period_for_date(d: date):
             row = cur.fetchone()
             if row:
                 sd_raw, ed_raw = row[0], row[1]
-                # convert to date if needed
-                sd = sd_raw if isinstance(sd_raw, date) else datetime.strptime(str(sd_raw), "%Y-%m-%d").date()
-                ed = ed_raw if isinstance(ed_raw, date) else datetime.strptime(str(ed_raw), "%Y-%m-%d").date()
+                sd = sd_raw if isinstance(sd_raw, date) else datetime.strptime(str(sd_raw).split(" ")[0], "%Y-%m-%d").date()
+                ed = ed_raw if isinstance(ed_raw, date) else datetime.strptime(str(ed_raw).split(" ")[0], "%Y-%m-%d").date()
                 return sd, ed
     except Exception:
         logger.exception("_find_billing_period_for_date DB error")
-    # fallback
-    return get_month_start_and_end(d.strftime("%Y-%m"))
+    # fallback: return calendar month for the date d
+    try:
+        year_month = f"{d.year}-{str(d.month).zfill(2)}"
+        return get_billing_period(int(d.year), int(d.month))
+    except Exception:
+        # safe final fallback: today calendar month
+        s = d.replace(day=1)
+        nm = (s.replace(day=28) + timedelta(days=4)).replace(day=1)
+        return s, (nm - timedelta(days=1))
 
 
-def month_day_to_week_number_for_period(d: date, period_start: date):
+
+def month_day_to_week_number_for_period(d: date, period_start: date, period_end: date = None):
     """
-    Map a date 'd' to a week number 1..4 relative to a billing period that begins at 'period_start'.
-    Weeks are contiguous 7-day buckets: day 0-6 -> week1, 7-13 -> week2, 14-20 -> week3, >=21 -> week4.
-    Capped to 1..4.
+    Map a date 'd' to a 1-based week number relative to a billing period that begins at 'period_start'.
+    Weeks are contiguous 7-day buckets starting at period_start:
+      days 0-6 -> week 1, 7-13 -> week 2, ...
+    This function dynamically supports more than 4 weeks if the billing period spans >28 days.
+    Returns an integer >=1.
+
+    If period_end provided, we compute the total weeks for the billing period; caller can use that
+    to display week blocks dynamically.
     """
     try:
+        if not period_start:
+            return 1
         delta_days = (d - period_start).days
-        week = ((delta_days) // 7) + 1
+        week = (delta_days // 7) + 1
         if week < 1:
             week = 1
-        if week > 4:
-            week = 4
+        # if period_end provided, cap to total weeks in period
+        if period_end:
+            total_days = (period_end - period_start).days + 1
+            total_weeks = int(ceil(total_days / 7.0))
+            if week > total_weeks:
+                week = total_weeks
         return week
     except Exception:
-        # fallback to calendar-based simple mapping (day-of-month)
-        return min(((d.day - 1) // 7) + 1, 4)
+        # conservative fallback based on calendar day-of-month
+        try:
+            return min(((d.day - 1) // 7) + 1, 5)
+        except Exception:
+            return 1
+
 
 def month_day_to_week_number(d):
     """
@@ -1897,10 +1929,11 @@ def my_allocations(request):
     # Build daily_dates list for billing period and compute week_number relative to billing_start
     daily_dates = []
     cur_day = billing_start
+    # compute total weeks in billing period (dynamic)
+    total_days = (billing_end - billing_start).days + 1
+    total_weeks = int(ceil(total_days / 7.0))
     while cur_day <= billing_end:
-        week_number = ((cur_day - billing_start).days // 7) + 1
-        if week_number < 1: week_number = 1
-        if week_number > 4: week_number = 4
+        week_number = month_day_to_week_number_for_period(cur_day, billing_start, billing_end)
         daily_dates.append({
             "date": cur_day,
             "iso": cur_day.strftime("%Y-%m-%d"),
