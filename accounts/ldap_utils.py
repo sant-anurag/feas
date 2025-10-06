@@ -81,7 +81,7 @@ def get_reportees_for_user_dn(user_dn: str, conn: Connection = None, username_pa
     """Return list of reportees for a given manager DN."""
     close_conn = False
     reportees = []
-    print(f"Getting reportees for manager DN: {username_password_for_conn}")
+    print(f"Getting reportees from {user_dn}")
     if conn is None:
         if username_password_for_conn:
             u, p = username_password_for_conn
