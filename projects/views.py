@@ -2820,91 +2820,225 @@ def export_allocations(request):
 
 def export_my_punches_pdf(request):
     """
-    Export punches for the logged-in user for the billing cycle corresponding to the
-    provided month (YYYY-MM). Uses get_billing_period(year, month) as source of truth.
+    Export punches PDF for the logged-in user for the canonical billing cycle for the requested month.
+    Accepts ?month=YYYY-MM (preferred) or ?month_start=YYYY-MM-DD.
+    Tries multiple session_ldap variants if direct match returns no rows.
     """
     import io
     from django.template.loader import render_to_string
     from xhtml2pdf import pisa
 
-    session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or getattr(request.user, 'email', None)
+    session_ldap = (request.session.get("ldap_username")
+                    or request.session.get("user_email")
+                    or request.session.get("user_ldap")
+                    or getattr(request.user, "email", None)
+                    or getattr(request.user, "username", None))
     if not session_ldap:
         return HttpResponseBadRequest("Not authenticated")
 
-    month_param = request.GET.get("month", date.today().strftime("%Y-%m"))
+    # determine billing period
+    month_param = request.GET.get("month")
+    month_start_param = request.GET.get("month_start")
     try:
-        year, month = map(int, month_param.split("-"))
-    except Exception:
-        year, month = date.today().year, date.today().month
+        if month_start_param:
+            dt = datetime.strptime(month_start_param, "%Y-%m-%d").date()
+            billing_start, billing_end = get_billing_period_for_date(dt)
+        elif month_param:
+            y, m = map(int, month_param.split("-"))
+            billing_start, billing_end = get_billing_period(y, m)
+        else:
+            # fallback to current month billing
+            today = date.today()
+            billing_start, billing_end = get_billing_period(today.year, today.month)
+    except Exception as ex:
+        logger.exception("export_my_punches_pdf: invalid month param: %s", ex)
+        today = date.today()
+        billing_start, billing_end = get_billing_period(today.year, today.month)
 
-    month_start, month_end = get_billing_period(year, month)
+    rows = []
+    tried = []
 
-    with connection.cursor() as cur:
-        cur.execute("""
-            SELECT up.allocation_id, mae.project_id, p.name as project_name, mae.iom_id, pw.department,
-                   up.punch_date, up.week_number, up.actual_hours, up.wbs
-            FROM user_punches up
-            LEFT JOIN monthly_allocation_entries mae ON mae.id = up.allocation_id
-            LEFT JOIN projects p ON mae.project_id = p.id
-            LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
-            WHERE up.user_ldap = %s
-              AND up.punch_date BETWEEN %s AND %s
-            ORDER BY up.punch_date, p.name
-        """, [session_ldap, month_start, month_end])
-        rows = dictfetchall(cur)
+    def fetch_for_ldap(ldap_val):
+        with connection.cursor() as cur:
+            cur.execute("""
+                SELECT up.allocation_id, mae.project_id, p.name as project_name, mae.iom_id, pw.department AS department,
+                       up.punch_date, up.week_number, up.actual_hours, up.wbs
+                FROM user_punches up
+                LEFT JOIN monthly_allocation_entries mae ON mae.id = up.allocation_id
+                LEFT JOIN projects p ON mae.project_id = p.id
+                LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
+                WHERE up.user_ldap = %s
+                  AND up.punch_date BETWEEN %s AND %s
+                ORDER BY up.punch_date, p.name
+            """, [ldap_val, billing_start, billing_end])
+            return dictfetchall(cur)
 
-    html = render_to_string("projects/punches_pdf.html", {"rows": rows, "month": month_param, "user": session_ldap,
-                                                          "billing_start": month_start, "billing_end": month_end})
+    # 1) try with exact session_ldap
+    rows = fetch_for_ldap(session_ldap)
+    tried.append(("exact", session_ldap, len(rows)))
+
+    # 2) try with lowercase email
+    if not rows and "@" in str(session_ldap):
+        alt = session_ldap.lower()
+        rows = fetch_for_ldap(alt)
+        tried.append(("lower", alt, len(rows)))
+
+    # 3) try using only local-part (before @)
+    if not rows and "@" in str(session_ldap):
+        local = session_ldap.split("@", 1)[0]
+        rows = fetch_for_ldap(local)
+        tried.append(("localpart", local, len(rows)))
+
+    # 4) try wildcard LIKE search on email / ldap values
+    if not rows:
+        # attempt wildcard searches using parts of username
+        candidates = []
+        if "@" in str(session_ldap):
+            candidates.append("%" + session_ldap.split("@", 1)[0] + "%")
+            candidates.append("%" + session_ldap + "%")
+        else:
+            candidates.append("%" + session_ldap + "%")
+        # also try replacing dots with underscores and vice-versa
+        srep = str(session_ldap).replace(".", "_")
+        candidates.append("%" + srep + "%")
+        # run attempts
+        for pattern in candidates:
+            with connection.cursor() as cur:
+                cur.execute("""
+                    SELECT up.allocation_id, mae.project_id, p.name as project_name, mae.iom_id, pw.department AS department,
+                           up.punch_date, up.week_number, up.actual_hours, up.wbs
+                    FROM user_punches up
+                    LEFT JOIN monthly_allocation_entries mae ON mae.id = up.allocation_id
+                    LEFT JOIN projects p ON mae.project_id = p.id
+                    LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
+                    WHERE up.user_ldap LIKE %s
+                      AND up.punch_date BETWEEN %s AND %s
+                    ORDER BY up.punch_date, p.name
+                """, [pattern, billing_start, billing_end])
+                tmp = dictfetchall(cur)
+            tried.append(("wildcard", pattern, len(tmp)))
+            if tmp:
+                rows = tmp
+                break
+
+    logger.debug("export_my_punches_pdf tried patterns: %r", tried)
+
+    # Render PDF (allow empty rows but show message)
+    html = render_to_string("projects/punches_pdf.html", {
+        "rows": rows,
+        "month": month_param or billing_start.strftime("%Y-%m"),
+        "user": session_ldap,
+        "billing_start": billing_start, "billing_end": billing_end,
+        "tried": tried
+    })
     result = io.BytesIO()
-    pisa_status = pisa.CreatePDF(io.BytesIO(html.encode('utf-8')), dest=result)
+    pisa_status = pisa.CreatePDF(io.BytesIO(html.encode("utf-8")), dest=result)
     if pisa_status.err:
+        logger.exception("pisa create pdf failed")
         return HttpResponse("Error generating PDF", status=500)
     result.seek(0)
-    safe_user = session_ldap.replace("@", "_at_").replace(".", "_")
-    filename = f"punches_{safe_user}_{month_param}.pdf"
-    response = HttpResponse(result.read(), content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    safe_user = str(session_ldap).replace("@", "_at_").replace(".", "_")
+    filename = f"punches_{safe_user}_{(month_param or billing_start.strftime('%Y-%m'))}.pdf"
+    response = HttpResponse(result.read(), content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
 
 def export_my_punches_excel(request):
     """
-    Export the logged-in user's punches for the billing cycle corresponding to `month` (YYYY-MM).
-    Uses get_billing_period(year, month) as the single source of truth for start/end.
+    Export punches for logged-in user to Excel for the canonical billing period.
+    Same input options and LDAP fallback logic as export_my_punches_pdf.
     """
     import io
     import openpyxl
     from openpyxl.utils import get_column_letter
 
-    session_ldap = request.session.get("ldap_username") or request.session.get("user_email") or getattr(request.user, 'email', None)
+    session_ldap = (request.session.get("ldap_username")
+                    or request.session.get("user_email")
+                    or request.session.get("user_ldap")
+                    or getattr(request.user, "email", None)
+                    or getattr(request.user, "username", None))
     if not session_ldap:
         return HttpResponseBadRequest("Not authenticated")
 
-    month_param = request.GET.get("month", date.today().strftime("%Y-%m"))
+    # determine billing period
+    month_param = request.GET.get("month")
+    month_start_param = request.GET.get("month_start")
     try:
-        year, month = map(int, month_param.split("-"))
-    except Exception:
-        year, month = date.today().year, date.today().month
+        if month_start_param:
+            dt = datetime.strptime(month_start_param, "%Y-%m-%d").date()
+            billing_start, billing_end = get_billing_period_for_date(dt)
+        elif month_param:
+            y, m = map(int, month_param.split("-"))
+            billing_start, billing_end = get_billing_period(y, m)
+        else:
+            today = date.today()
+            billing_start, billing_end = get_billing_period(today.year, today.month)
+    except Exception as ex:
+        logger.exception("export_my_punches_excel: invalid month param: %s", ex)
+        today = date.today()
+        billing_start, billing_end = get_billing_period(today.year, today.month)
 
-    month_start, month_end = get_billing_period(year, month)
+    rows = []
+    tried = []
 
-    # fetch punches for user & billing window
-    with connection.cursor() as cur:
-        cur.execute("""
-            SELECT up.allocation_id, mae.project_id, p.name as project_name, mae.iom_id, pw.department,
-                   up.punch_date, up.week_number, up.actual_hours, up.wbs
-            FROM user_punches up
-            LEFT JOIN monthly_allocation_entries mae ON mae.id = up.allocation_id
-            LEFT JOIN projects p ON mae.project_id = p.id
-            LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
-            WHERE up.user_ldap = %s
-              AND up.punch_date BETWEEN %s AND %s
-            ORDER BY up.punch_date, p.name
-        """, [session_ldap, month_start, month_end])
-        rows = dictfetchall(cur)
+    def fetch_for_ldap(ldap_val):
+        with connection.cursor() as cur:
+            cur.execute("""
+                SELECT up.allocation_id, mae.project_id, p.name as project_name, mae.iom_id, pw.department AS department,
+                       up.punch_date, up.week_number, up.actual_hours, up.wbs
+                FROM user_punches up
+                LEFT JOIN monthly_allocation_entries mae ON mae.id = up.allocation_id
+                LEFT JOIN projects p ON mae.project_id = p.id
+                LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
+                WHERE up.user_ldap = %s
+                  AND up.punch_date BETWEEN %s AND %s
+                ORDER BY up.punch_date, p.name
+            """, [ldap_val, billing_start, billing_end])
+            return dictfetchall(cur)
 
+    # Try exact and fallback variants
+    rows = fetch_for_ldap(session_ldap)
+    tried.append(("exact", session_ldap, len(rows)))
+    if not rows and "@" in str(session_ldap):
+        rows = fetch_for_ldap(session_ldap.lower())
+        tried.append(("lower", session_ldap.lower(), len(rows)))
+    if not rows and "@" in str(session_ldap):
+        local = session_ldap.split("@", 1)[0]
+        rows = fetch_for_ldap(local)
+        tried.append(("localpart", local, len(rows)))
+    if not rows:
+        candidates = []
+        if "@" in str(session_ldap):
+            candidates.append("%" + session_ldap.split("@", 1)[0] + "%")
+            candidates.append("%" + session_ldap + "%")
+        else:
+            candidates.append("%" + session_ldap + "%")
+        for pattern in candidates:
+            with connection.cursor() as cur:
+                cur.execute("""
+                    SELECT up.allocation_id, mae.project_id, p.name as project_name, mae.iom_id, pw.department AS department,
+                           up.punch_date, up.week_number, up.actual_hours, up.wbs
+                    FROM user_punches up
+                    LEFT JOIN monthly_allocation_entries mae ON mae.id = up.allocation_id
+                    LEFT JOIN projects p ON mae.project_id = p.id
+                    LEFT JOIN prism_wbs pw ON mae.iom_id = pw.iom_id
+                    WHERE up.user_ldap LIKE %s
+                      AND up.punch_date BETWEEN %s AND %s
+                    ORDER BY up.punch_date, p.name
+                """, [pattern, billing_start, billing_end])
+                tmp = dictfetchall(cur)
+            tried.append(("wildcard", pattern, len(tmp)))
+            if tmp:
+                rows = tmp
+                break
+
+    logger.debug("export_my_punches_excel tried patterns: %r", tried)
+
+    # Build Excel
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = f"Punches {month_param}"
+    ws.title = f"Punches {month_param or billing_start.strftime('%Y-%m')}"
 
     headers = ["Date", "Project", "IOM", "Dept", "Week#", "Hours", "WBS"]
     for i, h in enumerate(headers, start=1):
@@ -2913,27 +3047,26 @@ def export_my_punches_excel(request):
 
     r = 2
     for rec in rows:
-        # punch_date may already be a date object or a string depending on DB driver
-        pd = rec.get('punch_date')
-        if hasattr(pd, 'strftime'):
+        pd = rec.get("punch_date")
+        if hasattr(pd, "strftime"):
             pd_str = pd.strftime("%Y-%m-%d")
         else:
-            pd_str = pd or ''
+            pd_str = pd or ""
         ws.cell(row=r, column=1, value=pd_str)
-        ws.cell(row=r, column=2, value=rec.get('project_name'))
-        ws.cell(row=r, column=3, value=rec.get('iom_id'))
-        ws.cell(row=r, column=4, value=rec.get('department'))
-        ws.cell(row=r, column=5, value=rec.get('week_number'))
-        ws.cell(row=r, column=6, value=float(rec.get('actual_hours') or 0))
-        ws.cell(row=r, column=7, value=rec.get('wbs') or '')
+        ws.cell(row=r, column=2, value=rec.get("project_name"))
+        ws.cell(row=r, column=3, value=rec.get("iom_id"))
+        ws.cell(row=r, column=4, value=rec.get("department"))
+        ws.cell(row=r, column=5, value=rec.get("week_number"))
+        ws.cell(row=r, column=6, value=float(rec.get("actual_hours") or 0))
+        ws.cell(row=r, column=7, value=rec.get("wbs") or "")
         r += 1
 
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-
-    safe_user = session_ldap.replace("@", "_at_").replace(".", "_")
-    filename = f"punches_{safe_user}_{month_param}.xlsx"
-    response = HttpResponse(output.read(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    safe_user = str(session_ldap).replace("@", "_at_").replace(".", "_")
+    filename = f"punches_{safe_user}_{(month_param or billing_start.strftime('%Y-%m'))}.xlsx"
+    response = HttpResponse(output.read(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
