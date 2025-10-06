@@ -1,16 +1,190 @@
 {% extends "base.html" %}
 {% block content %}
+
+<style>
+    body {
+        font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+        margin: 0;
+        min-height: 100vh;
+        background: none; /* No page background color */
+    }
+   .container {
+    max-width: 700px; /* increased from 500px */
+    margin: 48px auto 0 auto;
+    padding: 0 16px;
+}
+
+.glass-card,
+.panel {
+    background: rgba(255,255,255,0.85);
+    box-shadow: 0 10px 32px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.02);
+    border-radius: 18px;
+    padding: 32px 24px;
+    backdrop-filter: blur(7px);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+    h2 {
+        font-weight: 600;
+        font-size: 1.7rem;
+        color: #185ABD;
+        margin-bottom: 24px;
+        text-align: center;
+    }
+    form {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    label {
+        font-size: 1rem;
+        color: #374151;
+        margin-bottom: 0;
+        white-space: nowrap;
+    }
+    input[type="date"], input[type="text"] {
+        background: rgba(244,247,254,0.89);
+        border: 1px solid #bcd3ee;
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 1rem;
+        margin-right: 4px;
+        box-shadow: 0 1px 2px rgba(128,128,128,0.05);
+        min-width: 120px;
+        transition: border .2s;
+    }
+    input:focus {
+        border-color: #185ABD;
+        outline: none;
+    }
+    .btn-primary {
+        background: linear-gradient(90deg,#61a2fa 0%,#1552db 100%);
+        border: none;
+        color: #fff;
+        font-weight: 600;
+        padding: 7px 18px;
+        border-radius: 8px;
+        font-size: 1rem;
+        box-shadow: 0 2px 10px rgba(85,152,255,0.10);
+        cursor: pointer;
+        transition: background .18s, box-shadow .18s;
+    }
+    .btn-primary:hover {
+        background: linear-gradient(90deg,#3f85e4 0%,#0f3e9f 100%);
+        box-shadow: 0 3px 22px rgba(33,108,255,0.18);
+    }
+    table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        background: rgba(245,248,255,0.6);
+        border-radius: 12px;
+        box-shadow: 0 1px 8px rgba(0,0,0,0.03);
+        margin-top: 8px;
+        table-layout: fixed;
+    }
+    th, td {
+        padding: 12px 10px;
+        font-size: 1rem;
+        text-align: left;
+    }
+    th {
+        background: #e9f1fc;
+        color: #185ABD;
+        font-weight: 600;
+        border-bottom: 1px solid #cbd8ee;
+    }
+    td {
+        color: #214172;
+    }
+    tr:not(:last-child) td {
+        border-bottom: 1px solid #e3e8f0;
+    }
+    tbody tr:hover td {
+        background: #f0f8ff;
+    }
+    @media (max-width: 600px) {
+        .container {
+            max-width: 100%;
+            padding: 0 6px;
+        }
+        .glass-card {
+            padding: 16px 8px;
+        }
+        th, td {
+            padding: 8px 6px;
+            font-size: .96rem;
+        }
+        h2 {
+            font-size: 1.2rem;
+        }
+        form {
+            flex-direction: column;
+            gap: 8px;
+        }
+    }
+
+    .holiday-form .form-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+.holiday-form label {
+  margin-bottom: 0;
+  font-weight: 500;
+  color: #374151;
+}
+.holiday-form .form-row {
+    flex-wrap: wrap;
+    width: 100%;
+    justify-content: space-between;
+}
+
+.holiday-form input[type="date"],
+.holiday-form input[type="text"] {
+  flex: 0 0 auto;
+  width: 160px;
+}
+
+@media (max-width: 700px) {
+  .holiday-form .form-row {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .holiday-form input[type="date"],
+  .holiday-form input[type="text"] {
+    width: 100%;
+  }
+}
+
+</style>
+
+
+
+
 <div class="container">
   <div class="panel">
     <h2>Organization Holidays</h2>
-    <form method="post" action="{% url 'settings:settings_holidays_add' %}" style="margin-bottom:16px;">
+    <form method="post" action="{% url 'settings:settings_holidays_add' %}" class="holiday-form">
       {% csrf_token %}
-      <label>Date:</label>
-      <input type="date" name="holiday_date" required>
-      <label>Name:</label>
-      <input type="text" name="name" required>
-      <button type="submit" class="btn btn-primary">Add Holiday</button>
+      <div class="form-row">
+        <label for="holiday_date">Date:</label>
+        <input type="date" name="holiday_date" id="holiday_date" required>
+
+        <label for="holiday_name">Name:</label>
+        <input type="text" name="name" id="holiday_name" required>
+
+        <button type="submit" class="btn-primary">Add Holiday</button>
+      </div>
     </form>
+
 
     <table class="table">
       <thead><tr><th>Date</th><th>Occasion</th></tr></thead>
