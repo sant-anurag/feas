@@ -19,10 +19,11 @@ MENU_TREE = [
     {
         "key": "dashboard",
         "title": "Dashboard",
-        "icon": "tachometer-alt",
+        "icon": "gauge-high",  # or "tachometer-alt" if using FA5
         "url": reverse_lazy("dashboard:home"),
-        "roles": ["ADMIN", "PDL", "COE_LEADER", "TEAM_LEAD", "EMPLOYEE"],
+        "roles": ["ADMIN", "PDL", "TEAM_LEAD", "COE_LEADER", "EMPLOYEE"],
     },
+
     {
         "key": "projects",
         "title": "Projects",

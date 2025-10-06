@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "allocations",
     "notifications",
     "base",
+    "dashboard",
 ]
 
 MIDDLEWARE = [
