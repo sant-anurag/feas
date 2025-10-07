@@ -76,8 +76,6 @@ def dashboard_view(request):
 
     return render(request, "dashboard/home.html", context)
 
-
-
 # ---------------------------------------------------------------------
 #  INDIVIDUAL DATA FUNCTIONS
 # ---------------------------------------------------------------------
@@ -100,9 +98,33 @@ def compute_user_stats(user_ldap, month_iso):
         "remaining_hours": round(max(max_hours - total, 0), 2),
     }
 
-
 def list_user_allocations(user_ldap):
-    """List top 10 allocations for current user."""
+    """
+    Retrieve the top 10 project allocations for a given user.
+
+    This function queries the `monthly_allocation_entries` table to find all allocations
+    for the specified user, joins with the `projects` table to get project names, and
+    sums the total hours allocated per project. Results are ordered by total hours in
+    descending order and limited to the top 10 projects.
+
+    Args:
+        user_ldap (str): The LDAP username or identifier for the user.
+
+    Returns:
+        List[Dict]: A list of dictionaries, each containing:
+            - project_id (int): Unique identifier of the project.
+            - project_name (str): Name of the project.
+            - total_hours (float): Total hours allocated to the user for the project.
+
+    Example:
+        allocations = list_user_allocations("john.doe")
+        for alloc in allocations:
+            print(alloc["project_name"], alloc["total_hours"])
+
+    Raises:
+        Any database errors will propagate from the underlying dict_fetchall helper.
+        If no allocations are found, returns an empty list.
+    """
     sql = """
         SELECT m.project_id, p.name AS project_name, SUM(m.total_hours) AS total_hours
         FROM monthly_allocation_entries m
@@ -119,7 +141,36 @@ def list_user_allocations(user_ldap):
 #  MANAGER DATA FUNCTIONS
 # ---------------------------------------------------------------------
 def get_reportees_for_manager(manager_ldap):
-    """Get reportees directly under logged-in manager."""
+    """
+    Retrieve direct reportees for a given manager from the LDAP directory.
+
+    This function queries the `ldap_directory` table to find users whose `manager_dn`
+    matches the LDAP DN of the specified manager. It returns a list of dictionaries
+    containing the LDAP username, common name, and title for each reportee.
+
+    Args:
+        manager_ldap (str): The LDAP username or identifier of the manager.
+
+    Returns:
+        List[Dict]: A list of dictionaries, each containing:
+            - user_ldap (str): The LDAP username of the reportee.
+            - name (str): The common name (CN) of the reportee.
+            - title (str): The title of the reportee.
+
+    SQL Query Details:
+        - Selects username, CN, and title from `ldap_directory`.
+        - Filters users whose `manager_dn` matches the LDAP DN of the given manager.
+        - Uses a subquery to resolve the manager's LDAP DN.
+
+    Example:
+        reportees = get_reportees_for_manager("manager.ldap")
+        for r in reportees:
+            print(r["name"], r["title"])
+
+    Raises:
+        Any database errors will propagate from the underlying dict_fetchall helper.
+        If no reportees are found, returns an empty list.
+    """
     sql = """
         SELECT ld.username AS user_ldap, ld.cn AS name, ld.title
         FROM ldap_directory ld
@@ -131,7 +182,35 @@ def get_reportees_for_manager(manager_ldap):
 
 
 def compute_manager_totals(reportees, year):
-    """Aggregate team-level allocation and billing ratio."""
+    """
+    Aggregate team-level allocation and billing ratio for a manager's reportees.
+
+    This function calculates the total hours allocated to all direct reportees of a manager
+    for a given year. It also computes the billing ratio, which is the percentage of total
+    allocated hours compared to the maximum possible hours (183.75 per reportee). The result
+    includes the total allocation, billing ratio, and a placeholder for open allocations.
+
+    Args:
+        reportees (List[Dict]): List of dictionaries representing reportees, each containing at least 'user_ldap'.
+        year (int): The year for which allocations are aggregated.
+
+    Returns:
+        Dict: A dictionary containing:
+            - team_alloc (float): Total hours allocated to the team.
+            - billing_ratio (str): Billing ratio as a percentage string.
+            - open_allocations (int): Placeholder for open allocations (currently always 0).
+
+    SQL Query Details:
+        - Sums total_hours from monthly_allocation_entries for all reportees in the given year.
+
+    Example:
+        totals = compute_manager_totals(reportees, 2024)
+        print(totals["team_alloc"], totals["billing_ratio"])
+
+    Raises:
+        Any database errors will propagate from the underlying dict_fetchall helper.
+        If reportees is empty, returns zeroed values.
+    """
     if not reportees:
         return {"team_alloc": 0, "billing_ratio": "0%", "open_allocations": 0}
 
@@ -159,67 +238,82 @@ def compute_manager_totals(reportees, year):
 def resolve_possible_creators_from_session(request):
     """
     Return a list of possible strings that might match prism_wbs.creator for the current logged-in user.
-    (Same helper you had originally — unchanged)
+
+    This function generates a list of possible creator identifiers based on the user's session and profile.
+    It considers the user's common name (cn), username, display name, and related LDAP directory entries.
+    The output is used to match records in the database where the creator field may have different formats.
+
+    Args:
+        request (HttpRequest): The Django request object containing session and user info.
+
+    Returns:
+        List[str]: A list of possible creator strings for the current user.
     """
-    possible = []
-    cn = request.session.get('cn')
+    possible = []  # List to collect possible creator strings
+
+    cn = request.session.get('cn')  # Get common name from session
     if cn:
-        cn = str(cn).strip()
-        possible.append(cn)
-        parts = cn.split()
+        cn = str(cn).strip()  # Ensure it's a string and strip whitespace
+        possible.append(cn)  # Add original CN
+        parts = cn.split()  # Split CN into parts
         if len(parts) >= 2:
             first = parts[0]
             rest = parts[1:]
-            reversed_form = " ".join(rest + [first])
+            reversed_form = " ".join(rest + [first])  # Reverse order
             if reversed_form not in possible:
-                possible.append(reversed_form)
-        cap = " ".join([p.capitalize() for p in cn.split()])
+                possible.append(reversed_form)  # Add reversed CN if not present
+        cap = " ".join([p.capitalize() for p in cn.split()])  # Capitalize each part
         if cap not in possible:
-            possible.append(cap)
+            possible.append(cap)  # Add capitalized CN
 
-    username = request.session.get('username') or getattr(request.user, 'username', None)
+    username = request.session.get('username') or getattr(request.user, 'username', None)  # Get username from session or user object
     if username:
         username = str(username).strip()
         if username not in possible:
-            possible.append(username)
+            possible.append(username)  # Add username
         if '@' in username:
-            local = username.split('@')[0]
+            local = username.split('@')[0]  # Get local part before @
             if '.' in local:
-                candidate = " ".join([p.capitalize() for p in local.split('.')])
+                candidate = " ".join([p.capitalize() for p in local.split('.')])  # Capitalize dot-separated parts
                 if candidate not in possible:
-                    possible.append(candidate)
+                    possible.append(candidate)  # Add candidate
             else:
                 candidate = local.capitalize()
                 if candidate not in possible:
-                    possible.append(candidate)
+                    possible.append(candidate)  # Add capitalized local part
 
     try:
-        display = request.user.get_full_name()
+        display = request.user.get_full_name()  # Try to get user's display name
     except Exception:
         display = None
     if display:
         display = display.strip()
         if display and display not in possible:
-            possible.append(display)
+            possible.append(display)  # Add display name if not present
 
     try:
         if username:
-            rows = dict_fetchall("SELECT cn, username, mail FROM ldap_directory WHERE username=%s OR mail=%s LIMIT 5", (username, username))
+            # Query LDAP directory for matching CN, username, or mail
+            rows = dict_fetchall(
+                "SELECT cn, username, mail FROM ldap_directory WHERE username=%s OR mail=%s LIMIT 5",
+                (username, username)
+            )
             for r in rows:
                 if r.get('cn') and r['cn'] not in possible:
-                    possible.append(r['cn'])
+                    possible.append(r['cn'])  # Add CN from LDAP
                 if r.get('mail') and r['mail'] not in possible:
-                    possible.append(r['mail'])
+                    possible.append(r['mail'])  # Add mail from LDAP
                 if r.get('username') and r['username'] not in possible:
-                    possible.append(r['username'])
+                    possible.append(r['username'])  # Add username from LDAP
     except Exception:
-        pass
+        pass  # Ignore errors in LDAP lookup
 
-    out = []
+    out = []  # Final output list, deduplicated
     for p in possible:
         if p and p not in out:
-            out.append(p)
-    return out
+            out.append(p)  # Add unique, non-empty values
+
+    return out  # Return list of possible creator strings
 
 
 # ---------------------------------------------------------------------
