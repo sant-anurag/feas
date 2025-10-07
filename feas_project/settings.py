@@ -25,8 +25,11 @@ SECRET_KEY = 'django-insecure-!(8t(i04*y(j%8(zb&jkc99)#i8u_bhqe)4!qle0tkevm@dju3
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
+SESSION_COOKIE_SECURE = False
+SESSION_COOKIE_DOMAIN = None
+SESSION_COOKIE_SAMESITE = 'Lax'
 
 # Application definition
 
@@ -37,13 +40,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-# your apps
+
     "accounts.apps.AccountsConfig",   # ensure accounts app config is used
     "projects",
     "allocations",
     "notifications",
     "base",
     "dashboard",
+    "settings"
 ]
 
 MIDDLEWARE = [
@@ -54,6 +58,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+
 ]
 
 ROOT_URLCONF = 'feas_project.urls'
@@ -109,6 +114,9 @@ LDAP_PORT = 389
 
 # Leave user search base empty if you want the whole directory
 LDAP_USER_SEARCH_BASE = ''
+# settings.py
+LOGIN_URL = '/accounts/login/'
+LOGIN_REDIRECT_URL = '/home/'      # or use reverse_lazy('dashboard:home')
 
 # Your forest/domain root
 LDAP_BASE_DN = 'DC=ls,DC=ege,DC=ds'

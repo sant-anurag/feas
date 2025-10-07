@@ -5,7 +5,7 @@ app_name = 'dashboard'
 
 urlpatterns = [
     # === MAIN DASHBOARD PAGE ===
-    path('', views.dashboard_view, name='home'),
+    path('home/', views.dashboard_view, name='home'),
 
     # === PDL endpoints (hours-only focused) ===
     # Monthly series (consumed vs estimated). Query param style: /api/pdl_hours_series/?year=2025

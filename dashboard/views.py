@@ -33,13 +33,14 @@ def last_12_months_list():
 #  (keeps original behavior but PDL section now renders hours-only visuals)
 # ---------------------------------------------------------------------
 
+from datetime import date
+
 def dashboard_view(request):
-    """Render role-based dashboard centered on logged-in user."""
-    user_role = request.session.get(
-        "role",
-        request.user.groups.first().name if hasattr(request.user, "groups") and request.user.groups.exists() else "EMPLOYEE",
-    )
-    user_ldap = request.session.get("username") or getattr(request.user, "username", None)
+    print("Rendering dashboard for user:", request.session.get('username', 'Anonymous'))
+
+    # Use session role only (fallback to EMPLOYEE)
+    user_role = request.session.get("role", "EMPLOYEE")
+    user_ldap = request.session.get("username") or None
     creator_cn = request.session.get("cn") or user_ldap or ""
 
     is_pdl = user_role in ("PDL", "ADMIN")
@@ -55,11 +56,9 @@ def dashboard_view(request):
         "last_12_months": last_12_months_list(),
     }
 
-    # Individual-level stats (everyone sees this)
     context["user_stats"] = compute_user_stats(user_ldap, selected_month)
     context["user_allocations"] = list_user_allocations(user_ldap)
 
-    # Manager section (if manager or PDL)
     if is_manager or is_pdl:
         reportees = get_reportees_for_manager(user_ldap)
         context["reportees"] = reportees
@@ -68,18 +67,15 @@ def dashboard_view(request):
     else:
         context["manager_view"] = False
 
-    # PDL section (PDL only)
     if is_pdl:
         context["pdl_view"] = True
-        # keep a conservative call to existing compute_pdl_totals (it returns ytd_hours & costs),
-        # but we will only display hours in the template.
         context["pdl_totals"] = compute_pdl_totals(year, request)
-        # pdl_variances is no longer rendered by template (we keep function for compatibility)
-        context["pdl_variances"] = []  # hide the IOM-wise variance table (we display dept/program charts instead)
+        context["pdl_variances"] = []
     else:
         context["pdl_view"] = False
 
     return render(request, "dashboard/home.html", context)
+
 
 
 # ---------------------------------------------------------------------
@@ -267,7 +263,7 @@ def compute_pdl_totals(year, request):
 #  Uses prism_master_wor per-month columns (jan..dec) for consumed and total_hours for estimated.
 #  Assumption: prism_master_wor contains the monthly columns jan..dec and total_hours.
 # ---------------------------------------------------------------------
-@login_required
+
 def pdl_hours_series(request, year):
     """
     Returns monthly series (consumed & estimated) for the logged-in user's created IOMs.
@@ -312,7 +308,7 @@ def pdl_hours_series(request, year):
 #  Query params: ?year=YYYY (&month=1..12 optionally) (&dept=DepartmentName optional)
 #  NOTE: This uses prism_wbs for aggregation — adjust table/column names if your schema differs.
 # ---------------------------------------------------------------------
-@login_required
+
 def pdl_program_breakdown(request):
     """
     Return program-wise or department-wise breakdown for PDL's created IOMs.

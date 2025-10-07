@@ -39,7 +39,7 @@
       <button id="userToggle" class="user-toggle" aria-haspopup="true" aria-expanded="false">
         <span class="user-avatar">{{ request.session.cn|slice:":1"|default:"U"|upper }}</span>
         <span class="user-meta">
-          <span class="user-name">{{ request.session.cn|default:request.session.username|default:"User" }}</span>
+          <span class="user-name">{{ request.session.cn|default:request.session.ldap_username|default:"User" }}</span>
           <span class="user-role">{{ request.session.title|default:"" }}</span>
         </span>
         <svg class="caret" width="12" height="12" viewBox="0 0 24 24" fill="none">

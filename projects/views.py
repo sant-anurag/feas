@@ -1861,6 +1861,7 @@ def my_allocations(request):
 
     # Resolve user identity (same approach you used previously)
     session_ldap = request.session.get("ldap_username") or request.session.get("user_ldap") or getattr(request.user, "email", None)
+    print("session_ldap:", session_ldap)
     if not session_ldap:
         return HttpResponseBadRequest("No user identity found")
 

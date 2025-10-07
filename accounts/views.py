@@ -15,12 +15,22 @@ from ldap3 import Server, Connection, ALL, SUBTREE
 from feas_project.db_initializer import initialize_database
 from .ldap_utils import get_user_entry_by_username, get_reportees_for_user_dn
 import logging
+import datetime
+import threading
+from urllib.parse import urlencode
+
+from django.conf import settings
+from django.shortcuts import render, redirect
+from django.urls import reverse
+from django.http import HttpResponseRedirect
+from django.contrib import messages
+from django.utils.http import url_has_allowed_host_and_scheme
 
 logger = logging.getLogger(__name__)
 
 def _get_logged_in_username_from_session(request):
     # adapt to how you saved session in login_view earlier:
-    # earlier we set request.session['username'] = username (likely sAMAccountName or UPN)
+    # earlier we set request.session['ldap_username'] = username (likely sAMAccountName or UPN)
     return request.session.get('username')
 
 def reportees_view(request):
@@ -104,122 +114,136 @@ def check_credentials_bind(username: str, password: str):
         return False, None, None, "LDAP connection error"
 
 
+# accounts/views.py
+
+
+# Import your LDAP helpers
+# from .ldap_helpers import check_credentials_bind, get_user_entry_by_username, get_reportees_for_user_dn, map_role_from_ldap_attrs
+# from .initializers import initialize_database
+
+from django.http import HttpResponseRedirect
+from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
+
 @csrf_exempt
 def login_view(request):
-    """
-    Login page: authenticates via LDAP (bind). On success:
-      - reuses the bound connection to fetch user_entry and reportees
-      - stores basic user info and role in session
-      - triggers DB initializer in background thread
-      - redirects to dashboard or root
-    """
-    # If already logged in (session flag), redirect to home
+    print("[DEBUG] Entered login_view")
     if request.session.get('is_authenticated'):
+        print("[DEBUG] User already authenticated, redirecting to dashboard:home")
         return redirect('dashboard:home') if 'dashboard' in settings.INSTALLED_APPS else redirect('/')
 
-    message = ""
-    message_status = ""
-
+    print(f"[DEBUG] Request method: {request.method}")
     if request.method == "POST":
         username = request.POST.get("username", "").strip()
         password = request.POST.get("password", "")
+        print(f"[DEBUG] POST received. Username: '{username}', Password provided: {'Yes' if password else 'No'}")
+
         if not username or not password:
+            print("[DEBUG] Username or password missing")
             messages.error(request, "Please enter username and password.")
             return render(request, "accounts/login.html")
 
-        # Optional super-admin bypass (only for controlled environments)
+        # Superadmin path (unchanged)
         if username == getattr(settings, "FEAS_SUPERADMIN_USERNAME", "admin") and password == getattr(settings, "FEAS_SUPERADMIN_PASSWORD", "admin"):
+            print("[DEBUG] Superadmin login detected")
             request.session['is_authenticated'] = True
-            request.session['username'] = username
+            request.session['ldap_username'] = username
             request.session['cn'] = 'Administrator'
             request.session['title'] = 'Administrator'
             request.session['role'] = "ADMIN"
-            messages.success(request, "Logged in as super admin.")
-            # spawn DB init thread
-            threading.Thread(target=initialize_database, daemon=True).start()
-            return redirect('dashboard:home') if 'dashboard' in settings.INSTALLED_APPS else redirect('/')
+            request.session['last_login'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Save session immediately so cookie is set before redirect
+            try:
+                request.session.save()
+                print("[DEBUG] Superadmin session saved")
+            except Exception as e:
+                print(f"[DEBUG] Error saving session for superadmin: {e}")
+            return HttpResponseRedirect(reverse('dashboard:home'))
 
-        # Attempt LDAP bind as user
+        # LDAP bind/auth
         is_auth, conn, user_entry, err = check_credentials_bind(username, password)
+        print(f"[DEBUG] LDAP bind result: is_auth={is_auth}, err={err}")
+
         if err:
+            print(f"[DEBUG] LDAP error: {err}")
             messages.error(request, err)
             return render(request, "accounts/login.html")
 
         if is_auth and conn:
-            # success: set basic session values
+            print("[DEBUG] LDAP authentication successful")
+            # set session values
             request.session['is_authenticated'] = True
-            request.session['username'] = username
             request.session['ldap_username'] = username
-            request.session['ldap_password'] = password
             request.session['cn'] = str(getattr(user_entry, 'cn', username)) if user_entry else username
             request.session['title'] = str(getattr(user_entry, 'title', '')) if user_entry else ''
             request.session['last_login'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            messages.success(request, "Login successful.")
 
-            # Reuse same bound connection to fetch reportees and determine DN
-            user_dn = None
-            user_details = {}
+            # map role safely
             try:
+                user_details = {}
                 if user_entry:
-                    user_dn = user_entry.entry_dn
-                    # try to populate a lightweight user_details dict from attributes if present
-                    try:
-                        user_details['department'] = getattr(user_entry, 'department', None).value if hasattr(user_entry, 'department') and getattr(user_entry, 'department', None) else ""
-                        user_details['title'] = getattr(user_entry, 'title', None).value if hasattr(user_entry, 'title') and getattr(user_entry, 'title', None) else ""
-                    except Exception:
-                        # safe guard if ldap3 entry attr access differs
-                        user_details['department'] = ""
-                        user_details['title'] = ""
-                else:
-                    # fallback: try to resolve via helper using the user-bound conn
-                    resolved = get_user_entry_by_username(username, conn=conn, username_password_for_conn=None)
-                    if resolved:
-                        user_dn = resolved.entry_dn
-                        user_entry = resolved
-                # If we found DN, fetch reportees (reusing conn)
-                if user_dn:
-                    reportees = get_reportees_for_user_dn(user_dn, conn=conn)
-                    logger.info("Reportees for %s: %s", username, reportees)
-                    print(f"[DEBUG] Reportees for {username}: {reportees}")
-                else:
-                    logger.warning("Could not determine DN for user %s", username)
-            except Exception:
-                logger.exception("Error while fetching reportees for user %s", username)
-            finally:
-                # Close the user-bound connection (created during check_credentials_bind)
-                try:
-                    conn.unbind()
-                except Exception:
-                    pass
-
-            # --- NEW: determine role and store in session ---
-            try:
+                    user_details['department'] = getattr(user_entry, 'department', None).value if hasattr(user_entry, 'department') and getattr(user_entry, 'department', None) else ""
+                    user_details['title'] = getattr(user_entry, 'title', None).value if hasattr(user_entry, 'title', None) and getattr(user_entry, 'title', None) else ""
                 role = map_role_from_ldap_attrs(user_entry, user_details)
-                request.session['role'] = role
-                print("Assigned role ", role, "to user :",username,"and stored in session.")
-            except Exception:
-                logger.exception("Failed to map role for user %s; defaulting to EMPLOYEE", username)
+                print("Role mapped to:", role)
+                request.session['role'] = role or "EMPLOYEE"
+            except Exception as e:
+                print(f"[DEBUG] Role mapping failed: {e}")
                 request.session['role'] = "EMPLOYEE"
-            # --- END NEW ---
 
-            # Trigger DB initializer in a background thread (idempotent)
-            threading.Thread(target=initialize_database, daemon=True).start()
+            # close LDAP connection
+            try:
+                conn.unbind()
+            except Exception:
+                pass
 
-            # Redirect to application home
-            return redirect('dashboard:home') if 'dashboard' in settings.INSTALLED_APPS else redirect('/')
-        else:
-            # invalid credentials
-            messages.error(request, "Invalid username or password.")
-            return render(request, "accounts/login.html")
+            # ===== IMPORTANT: save session BEFORE launching DB init or redirect =====
+            try:
+                request.session.save()
+                print("[DEBUG] Session saved successfully after LDAP login. Session keys:", dict(request.session.items()))
+            except Exception as e:
+                print(f"[DEBUG] Error saving session after LDAP login: {e}")
 
-    # GET request – serve the login page
-    return render(request, "accounts/login.html", {
-        "message": message,
-        "message_status": message_status,
-    })
+            # ===== Start DB init AFTER session saved (or better: move it out of login entirely) =====
+            # If initialize_database modifies the same DB backing sessions, it can race with writes.
+            # Start it after session save (or remove it from the request path entirely).
+            try:
+                threading.Thread(target=initialize_database, daemon=True).start()
+                print("[DEBUG] Started DB initializer thread (after session save).")
+            except Exception as e:
+                print(f"[DEBUG] Could not start DB initializer thread: {e}")
+
+            # Safe redirect: prefer validated next param, else dashboard home
+            next_url = request.POST.get('next') or request.GET.get('next')
+            if next_url and url_has_allowed_host_and_scheme(next_url, {request.get_host()}, require_https=request.is_secure()):
+                print("[DEBUG] Redirecting to validated next_url:", next_url)
+                return HttpResponseRedirect(next_url)
+
+            home_url = reverse('dashboard:home')
+            print("[DEBUG] Redirecting to dashboard home:", home_url)
+            return HttpResponseRedirect(home_url)
+
+        # auth failed
+        messages.error(request, "Invalid username or password.")
+        return render(request, "accounts/login.html")
+
+    # GET
+    return render(request, "accounts/login.html")
+
 
 def logout_view(request):
-    request.session.flush()
+    """
+    Clear session and redirect to login.
+    """
+    # Remove keys we added (safe) and flush the session
+    try:
+        request.session.flush()   # this removes all session data and creates a new empty session
+    except Exception:
+        # fallback: pop known keys
+        for k in ['is_authenticated', 'username', 'ldap_username', 'ldap_dn', 'cn', 'title', 'role', 'last_login']:
+            request.session.pop(k, None)
+
+    messages.success(request, "Logged out.")
     return redirect('accounts:login')
 
 # accounts/views.py (add or paste near the imports)
@@ -232,6 +256,7 @@ def map_role_from_ldap_attrs(user_entry, user_details):
     """
     # prioritize memberOf groups
     member_of = None
+    print("[DEBUG] Mapping role from LDAP attributes")
     if user_entry is not None and hasattr(user_entry, 'memberOf') and user_entry.memberOf:
         try:
             # ldap3 multi-valued attr may be in .memberOf.values or iterable
