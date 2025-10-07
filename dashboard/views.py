@@ -36,11 +36,11 @@ def last_12_months_list():
 from datetime import date
 
 def dashboard_view(request):
-    print("Rendering dashboard for user:", request.session.get('username', 'Anonymous'))
+    print("Rendering dashboard for user:", request.session.get('ldap_username', 'Anonymous'))
 
     # Use session role only (fallback to EMPLOYEE)
     user_role = request.session.get("role", "EMPLOYEE")
-    user_ldap = request.session.get("username") or None
+    user_ldap = request.session['ldap_username'] or None
     creator_cn = request.session.get("cn") or user_ldap or ""
 
     is_pdl = user_role in ("PDL", "ADMIN")
@@ -375,7 +375,7 @@ def pdl_program_breakdown(request):
 # ---------------------------------------------------------------------
 def pdl_dept_summary(request, year):
     """Department summary restricted to logged-in user's created IOMs."""
-    creator_cn = request.session.get("cn") or request.session.get("username") or ""
+    creator_cn = request.session.get("cn") or request.session['ldap_username'] or ""
     sql = """
         SELECT department, SUM(total_hours) AS hours
         FROM prism_wbs
