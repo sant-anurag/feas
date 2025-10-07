@@ -183,7 +183,7 @@ def login_view(request):
                 user_details = {}
                 if user_entry:
                     user_details['department'] = getattr(user_entry, 'department', None).value if hasattr(user_entry, 'department') and getattr(user_entry, 'department', None) else ""
-                    user_details['title'] = getattr(user_entry, 'title', None).value if hasattr(user_entry, 'title', None) and getattr(user_entry, 'title', None) else ""
+                    user_details['title'] = getattr(user_entry, 'title', None).value if hasattr(user_entry, 'title') and getattr(user_entry, 'title', None) else ""
                 role = map_role_from_ldap_attrs(user_entry, user_details)
                 print("Role mapped to:", role)
                 request.session['role'] = role or "EMPLOYEE"
