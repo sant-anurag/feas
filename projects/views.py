@@ -1834,12 +1834,15 @@ def team_allocations(request):
     # SINGLE source of truth for LDAP username/password from session
     session_ldap = request.session.get("ldap_username")
     session_pwd = request.session.get("ldap_password")
+    print("team_allocations - session_ldap: ", session_ldap)
+    print("team_allocations - session_pwd: ", session_pwd)
     logger.debug("team_allocations - session_ldap: %s", session_ldap)
 
     # require login
-    if not session_ldap or not session_pwd:
+    if not request.session.get("is_authenticated"):
         return redirect("accounts:login")
     creds = (session_ldap, session_pwd)
+    print("team_allocations - creds: ", creds)
 
     # --- month param parsing (use YYYY-MM) ---
     month_str = request.GET.get("month")
@@ -2003,8 +2006,6 @@ def team_allocations(request):
         "reportees": reportees_ldaps,
         "reportees_no_alloc": reportees_no_alloc,
     })
-
-
 
 # -------------------------
 # save_team_allocation

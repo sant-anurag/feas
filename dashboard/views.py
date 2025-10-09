@@ -266,7 +266,7 @@ def resolve_possible_creators_from_session(request):
         if cap not in possible:
             possible.append(cap)  # Add capitalized CN
 
-    username = request.session.get('username') or getattr(request.user, 'username', None)  # Get username from session or user object
+    username = request.session.get('ldap_username') or getattr(request.user, 'ldap_username', None)  # Get username from session or user object
     if username:
         username = str(username).strip()
         if username not in possible:
