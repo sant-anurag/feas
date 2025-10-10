@@ -46,7 +46,6 @@
 .iom-over { box-shadow:0 0 0 3px rgba(255,99,71,0.05) inset; }
 .iom-badge { display:inline-block; background:#f1f6ff; border:1px solid #e6f0ff; color:#0b53a0; padding:6px 10px; border-radius:999px; font-weight:600; margin-left:8px; }
 
-/* tooltip */
 .save-tooltip { position:relative; display:inline-block; }
 .save-tooltip .tooltip-text { display:none; position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%); background:rgba(2,6,23,0.95); color:#fff; padding:10px 12px; border-radius:8px; font-size:0.9rem; max-width:420px; z-index:1400; box-shadow:0 8px 30px rgba(2,6,23,0.2); }
 .save-tooltip:hover .tooltip-text { display:block; }
@@ -140,6 +139,7 @@
     <div class="iom-card" role="region" aria-live="polite">
       <div class="iom-left">
         <div id="iomTitle" class="iom-title">IOM: —</div>
+        <div id="iomSubproject" class="iom-dept" style="margin-top:8px;">Subproject: <strong id="iomSubprojectName">—</strong></div>
         <div id="iomDept" class="iom-dept">Department: —</div>
         <div id="iomWbs" class="iom-dept">WBS: —</div>
         <div id="iomSite" class="iom-dept">Site: —</div>
@@ -214,6 +214,7 @@
 
   const iomDetailWrap = document.getElementById('iomDetailWrap');
   const iomTitle = document.getElementById('iomTitle');
+  const iomSubprojectName = document.getElementById('iomSubprojectName');
   const iomDept = document.getElementById('iomDept');
   const iomMonthFte = document.getElementById('iomMonthFte');
   const iomMonthHrs = document.getElementById('iomMonthHrs');
@@ -238,7 +239,7 @@
   const GET_SAVED_ALLOC_URL = '{% url "projects:get_allocations_for_iom" %}';
   const SAVE_ALLOC_URL = '{% url "projects:save_monthly_allocations" %}';
   const EXPORT_URL = '{% url "projects:export_allocations" %}';
-  // NEW: subprojects API (expects ?project_id=)
+  // NEW: subprojects API (expects ?project_id or ?bg_code)
   const GET_SUBPROJECTS_URL = '{% url "projects:api_subprojects" %}';
 
   // current month limit (per resource limit from DB)
@@ -255,6 +256,9 @@
     const subproject_id = subprojectSelect.value || '';
 
     if (!project_id) { alert('Please select a project'); return; }
+
+    // preserve current subproject selection so Load IOMs doesn't clear it
+    const preservedSubproject = subprojectSelect ? subprojectSelect.value : '';
 
     const params = new URLSearchParams({ project_id, year, month });
     if (search) params.set('search', search);
@@ -276,7 +280,8 @@
         iomsDropdown.appendChild(opt);
       });
       // Also load subprojects for the selected project (keeps dropdown in sync)
-      await loadSubprojects(project_id);
+      // pass preservedSubproject to avoid clearing user selection
+      await loadSubprojects(project_id, preservedSubproject);
     } catch (err) {
       console.error('loadIoms', err);
       alert('Failed to load IOMs (console).');
@@ -285,57 +290,73 @@
 
   loadIomsBtn.addEventListener('click', loadIoms);
 
-  // Updated loadSubprojects to match project.bg_code -> subprojects.mdm_code
-async function loadSubprojects(project_id) {
-  if (!project_id) return;
-  try {
-    // Try to read bg_code from the selected option attribute (preferred)
-    const projSel = document.getElementById('projectSelect');
-    const selectedOpt = projSel ? projSel.selectedOptions[0] : null;
-    const bg_code = selectedOpt ? (selectedOpt.dataset.bg || '').trim() : '';
+  /**
+   * loadSubprojects(project_id, preserveValue)
+   * - prefers sending bg_code if available via data-bg on selected option
+   * - populates subprojectSelect
+   * - if preserveValue provided and exists in new list, re-select it
+   */
+  async function loadSubprojects(project_id, preserveValue) {
+    if (!project_id) return;
+    try {
+      // Try to read bg_code from the selected option attribute (preferred)
+      const projSel = document.getElementById('projectSelect');
+      const selectedOpt = projSel ? projSel.selectedOptions[0] : null;
+      const bg_code = selectedOpt ? (selectedOpt.dataset.bg || '').trim() : '';
 
-    // Prepare URL and prefer bg_code param
-    const url = new URL(GET_SUBPROJECTS_URL, window.location.origin);
-    if (bg_code) {
-      url.searchParams.set('bg_code', bg_code);
-    } else {
-      // fallback for older API expecting project_id
-      url.searchParams.set('project_id', project_id);
-    }
+      // Prepare URL and prefer bg_code param
+      const url = new URL(GET_SUBPROJECTS_URL, window.location.origin);
+      if (bg_code) {
+        url.searchParams.set('bg_code', bg_code);
+      } else {
+        // fallback for older API expecting project_id
+        url.searchParams.set('project_id', project_id);
+      }
 
-    const res = await fetch(url.toString(), { credentials: 'same-origin' });
-    if (!res.ok) {
-      console.warn('loadSubprojects: non-OK response', res.status);
-      return;
+      const res = await fetch(url.toString(), { credentials: 'same-origin' });
+      if (!res.ok) {
+        console.warn('loadSubprojects: non-OK response', res.status);
+        return;
+      }
+      const data = await res.json();
+
+      // remember current selection if preserveValue not provided
+      const prev = (typeof preserveValue !== 'undefined' && preserveValue !== null) ? preserveValue : (subprojectSelect ? subprojectSelect.value : '');
+
+      const sel = document.getElementById('subprojectSelect');
+      sel.innerHTML = '<option value="">-- Select Subproject (optional) --</option>';
+      if (data && data.subprojects && data.subprojects.length) {
+        data.subprojects.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          // show name and mdm_code/bg code for clarity
+          opt.text = s.name + (s.mdm_code ? ` · ${s.mdm_code}` : '');
+          sel.appendChild(opt);
+        });
+        // try to re-select previous value if present
+        if (prev) {
+          const found = Array.from(sel.options).some(o => {
+            if (o.value === prev) { sel.value = prev; return true; }
+            return false;
+          });
+          // optionally if prev was not found attempt matching by text if prev looked like text
+        }
+      } else {
+        // no matching subprojects
+        const none = document.createElement('option');
+        none.value = '';
+        none.text = '-- No subprojects found --';
+        sel.appendChild(none);
+      }
+    } catch (err) {
+      console.warn('loadSubprojects error', err);
     }
-    const data = await res.json();
-    const sel = document.getElementById('subprojectSelect');
-    sel.innerHTML = '<option value="">-- Select Subproject (optional) --</option>';
-    if (data && data.subprojects && data.subprojects.length) {
-      data.subprojects.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        // show name and mdm_code/bg code for clarity
-        opt.text = s.name + (s.mdm_code ? ` · ${s.mdm_code}` : '');
-        sel.appendChild(opt);
-      });
-    } else {
-      // no matching subprojects
-      const none = document.createElement('option');
-      none.value = '';
-      none.text = '-- No subprojects found --';
-      sel.appendChild(none);
-    }
-  } catch (err) {
-    console.warn('loadSubprojects error', err);
   }
-}
 
-
-  // when project changes, update subproject dropdown automatically
+  // when project changes, update subproject dropdown automatically (user changed project -> clear selection)
   projectSelect.addEventListener('change', () => {
     const pid = projectSelect.value;
-    if (pid) loadSubprojects(pid);
+    if (pid) loadSubprojects(pid); // do not preserve here; user intentionally changed project
   });
 
   // when user selects an IOM from dropdown, fetch authoritative IOM details from server
@@ -384,6 +405,10 @@ async function loadSubprojects(project_id) {
     const selected = JSON.parse(iomsDropdown.value);
     // fetch authoritative details and then load saved allocations
     await fetchIomDetails(selected.iom_id);
+    // show selected subproject name in the IOM details (if any)
+    const sp = (subprojectSelect && subprojectSelect.selectedOptions && subprojectSelect.selectedOptions[0]) ? subprojectSelect.selectedOptions[0].textContent : '';
+    iomSubprojectName.textContent = sp || '—';
+
     allocSectionWrap.style.display = 'block';
     allocBody.innerHTML = ''; // clear previous rows
     // load saved rows for the selected IOM
