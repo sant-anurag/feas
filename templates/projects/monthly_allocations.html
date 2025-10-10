@@ -1,210 +1,205 @@
+{# templates/projects/monthly_allocations.html #}
 {% extends "base.html" %}
 {% load static %}
-{% block content %}
+{% block title %}Monthly Allocations{% endblock %}
 
+{% block content %}
 <link rel="stylesheet" href="{% static 'projects/css/monthly_allocations.css' %}">
 
 <style>
-/* (kept style from your latest version; minor spacing preserved) */
-.alloc-card { background:#fff; padding:26px; border-radius:12px; box-shadow:0 8px 30px rgba(12,35,66,0.06); }
-.page-title { margin:0 0 6px 0; font-size:1.6rem; font-weight:700; color:#0f172a; }
-.page-sub { color:#6b7280; margin-bottom:18px; }
+/* Local styles (kept compact) */
+.container-page { max-width:1180px; margin:20px auto; }
+.card-panel { background:#fff; border-radius:12px; padding:22px; box-shadow:0 8px 30px rgba(2,6,23,0.06); }
+.header-title { font-size:1.6rem; font-weight:700; color:#0b2447; margin-bottom:6px; }
+.header-sub { color:#6b7280; margin-bottom:18px; }
 
-.filters { display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px; }
+.controls { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px; }
 .control { min-width:220px; }
-.control label { display:block; font-weight:600; color:#475569; margin-bottom:6px; }
-.form-control, .form-select { padding:8px 12px; border-radius:8px; border:1px solid #e6eef7; min-height:40px; background:#fff; }
-.btn { padding:8px 12px; border-radius:8px; cursor:pointer; border:none; font-weight:600; }
-.btn-outline { background:transparent; border:1px solid #dbeafe; color:#0b4fd6; }
-.btn-primary { background:#0b5ed7; color:#fff; box-shadow:0 8px 24px rgba(11,94,215,0.12); }
-.btn-success { background:#059669; color:#fff; }
-.btn-compact { padding:6px 10px; font-size:0.95rem; }
+.control label { display:block; color:#475569; font-weight:600; margin-bottom:6px; }
+.form-control, .form-select { padding:9px 12px; border-radius:8px; border:1px solid #e6eef7; min-height:40px; background:#fff; width:100%; box-sizing:border-box; }
 
-/* IOM detail card */
-.iom-card { display:flex; justify-content:space-between; gap:12px; margin-top:12px; padding:14px; border-radius:8px; background:#f8fbff; border:1px solid #eef7ff; align-items:center; }
+.btn { padding:8px 12px; border-radius:8px; font-weight:700; cursor:pointer; border:none; }
+.btn-primary { background:#0b5ed7; color:#fff; }
+.btn-outline { background:transparent; border:1px solid #cfe3ff; color:#0b5ed7; }
+.small-muted { color:#6b7280; font-size:0.92rem; }
+
+.iom-card { margin-top:12px; padding:14px; border-radius:10px; background:#f8fbff; border:1px solid #eaf6ff; display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
 .iom-left { flex:1; }
-.iom-title { font-weight:700; font-size:1.02rem; color:#0f172a; }
-.iom-dept { color:#6b7280; margin-top:6px; }
-.iom-right { flex:0 0 260px; text-align:right; }
-.stat { display:block; color:#6b7280; margin-bottom:4px; }
-.stat strong { color:#0f172a; margin-left:8px; }
+.iom-title { font-weight:700; color:#0b2447; margin-bottom:6px; }
+.iom-meta { color:#475569; margin-top:6px; line-height:1.5; }
 
-/* allocations section */
-.section-title { margin-top:22px; font-weight:700; color:#0f172a; }
-.table-wrap { margin-top:12px; background:#fff; padding:12px; border-radius:8px; border:1px solid #eef7ff; }
-#allocBadge { float:right; margin-top:-34px; background:#eff6ff; color:#0b53a0; padding:8px 12px; border-radius:999px; border:1px solid #e6f0ff; font-weight:700; }
+.iom-right { width:260px; text-align:right; color:#475569; }
+.iom-right .stat { margin-bottom:6px; }
+.badge-remaining { display:inline-block; margin-top:8px; background:#eff6ff; color:#0b53a0; padding:8px 12px; border-radius:999px; font-weight:700; border:1px solid #e6f0ff; }
 
-/* table */
-.table { width:100%; border-collapse:collapse; margin-top:14px; }
-.table thead th { background:#f1f8ff; text-align:left; padding:10px; border-bottom:1px solid #edf2f7; font-weight:700; color:#0f172a; }
-.table tbody td { padding:10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
-.resource-td { min-width:260px; position:relative; }
-.remove-td { width:120px; text-align:center; }
+.alloc-section { margin-top:18px; }
+.alloc-table-wrap { background:#fff; padding:12px; border-radius:8px; border:1px solid #eef7ff; }
+.table { width:100%; border-collapse:collapse; margin-top:12px; }
+.table th { text-align:left; background:#f1f8ff; padding:10px; font-weight:700; color:#0b2447; border-bottom:1px solid #edf2f7; }
+.table td { padding:10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.input-small { width:120px; }
 
-/* visuals for invalid rows / over-allocated */
-.row-invalid { background:#fff4f6 !important; }
-.iom-over { box-shadow:0 0 0 3px rgba(255,99,71,0.05) inset; }
-.iom-badge { display:inline-block; background:#f1f6ff; border:1px solid #e6f0ff; color:#0b53a0; padding:6px 10px; border-radius:999px; font-weight:600; margin-left:8px; }
+.row-over { background:#fff4f6 !important; }
+.readonly { background:#f8fafc; color:#0b2447; }
 
-.save-tooltip { position:relative; display:inline-block; }
-.save-tooltip .tooltip-text { display:none; position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%); background:rgba(2,6,23,0.95); color:#fff; padding:10px 12px; border-radius:8px; font-size:0.9rem; max-width:420px; z-index:1400; box-shadow:0 8px 30px rgba(2,6,23,0.2); }
-.save-tooltip:hover .tooltip-text { display:block; }
+.toast { position:fixed; bottom:18px; right:18px; background:#111827; color:#fff; padding:10px 14px; border-radius:8px; display:none; z-index:9999; }
 
 @media (max-width:900px) {
-  .iom-card { flex-direction:column; align-items:flex-start; }
-  .iom-right { text-align:left; width:100%; margin-top:8px; }
-  #allocBadge { float:none; display:block; margin:8px 0; }
+  .iom-right { width:100%; text-align:left; margin-top:8px; }
+  .controls { flex-direction:column; align-items:stretch; }
 }
 </style>
 
-<div class="alloc-card" role="main" aria-labelledby="monthlyAllocTitle">
-  <div>
-    <h1 id="monthlyAllocTitle" class="page-title">Monthly Allocations</h1>
-    <div class="page-sub">Manage resources and FTE per IOM</div>
-  </div>
+<div class="container-page">
+  <div class="card-panel" role="main" aria-labelledby="ma-title">
+    <h1 id="ma-title" class="header-title">Monthly Allocations</h1>
+    <div class="header-sub">Manage resources and FTE per IOM</div>
 
-  <!-- Filters -->
-  <div class="filters" role="region" aria-label="Filters">
-    <div class="control">
-      <label for="projectSelect">Project</label>
-
-        {# monthly_allocations.html: ensure project option contains bg code attribute #}
+    <!-- Filters / Controls -->
+    <div class="controls" role="region" aria-label="Filters">
+      <div class="control">
+        <label for="projectSelect">Project</label>
         <select id="projectSelect" class="form-select">
-          {% if projects %}
-            {% for p in projects %}
-              <option value="{{ p.id }}" data-bg="{{ p.bg_code|default:''|escape }}">{{ p.name }}</option>
-            {% endfor %}
-          {% else %}
-            <option value="">-- No projects assigned --</option>
-          {% endif %}
+          <option value="">-- Select Project --</option>
+          {% for p in projects %}
+            {# include bg_code in data-bg if available in project dict #}
+            <option value="{{ p.id }}" data-bg="{{ p.bg_code|default:''|escape }}">{{ p.name }}</option>
+          {% endfor %}
         </select>
-    </div>
+      </div>
 
-    <!-- NEW: Subproject dropdown (populated when Load IOMs or project changes) -->
-    <div class="control">
-      <label for="subprojectSelect">Subproject</label>
-      <select id="subprojectSelect" class="form-select">
-        <option value="">-- Select Subproject (optional) --</option>
-      </select>
-    </div>
-
-    <div class="control">
-      <label for="yearInput">Year</label>
-      <input id="yearInput" class="form-control" type="number" value="{{ now.year }}">
-    </div>
-
-    <div class="control">
-      <label for="monthSelect">Month</label>
-      <select id="monthSelect" class="form-select">
-        <option value="1" {% if now.month == 1 %}selected{% endif %}>January</option>
-        <option value="2" {% if now.month == 2 %}selected{% endif %}>February</option>
-        <option value="3" {% if now.month == 3 %}selected{% endif %}>March</option>
-        <option value="4" {% if now.month == 4 %}selected{% endif %}>April</option>
-        <option value="5" {% if now.month == 5 %}selected{% endif %}>May</option>
-        <option value="6" {% if now.month == 6 %}selected{% endif %}>June</option>
-        <option value="7" {% if now.month == 7 %}selected{% endif %}>July</option>
-        <option value="8" {% if now.month == 8 %}selected{% endif %}>August</option>
-        <option value="9" {% if now.month == 9 %}selected{% endif %}>September</option>
-        <option value="10" {% if now.month == 10 %}selected{% endif %}>October</option>
-        <option value="11" {% if now.month == 11 %}selected{% endif %}>November</option>
-        <option value="12" {% if now.month == 12 %}selected{% endif %}>December</option>
-      </select>
-    </div>
-
-    <div style="display:flex; gap:8px; align-items:center;">
-      <button id="loadIomsBtn" class="btn btn-primary btn-compact">Load IOMs</button>
-    </div>
-  </div>
-
-  <!-- IOM selection -->
-  <div style="display:flex; gap:12px; margin-top:8px; align-items:flex-start; flex-wrap:wrap;">
-    <div style="flex:1; min-width:380px;">
-      <label for="iomsDropdown">Applicable IOMs</label>
-      <div style="display:flex; gap:8px;">
-        <select id="iomsDropdown" class="form-select" style="flex:1;">
-          <option value="">-- Load IOMs then select --</option>
+      <div class="control">
+        <label for="subprojectSelect">Subproject</label>
+        <select id="subprojectSelect" class="form-select">
+          <option value="">-- Select Subproject (optional) --</option>
         </select>
-        <button id="addIomBtn" class="btn btn-outline btn-compact">Add Selected IOM</button>
+      </div>
+
+      <div class="control">
+        <label for="yearInput">Year</label>
+        <input id="yearInput" type="number" class="form-control" value="{{ now.year }}">
+      </div>
+
+      <div class="control">
+        <label for="monthSelect">Month</label>
+        <select id="monthSelect" class="form-select">
+          <option value="1" {% if now.month == 1 %}selected{% endif %}>January</option>
+          <option value="2" {% if now.month == 2 %}selected{% endif %}>February</option>
+          <option value="3" {% if now.month == 3 %}selected{% endif %}>March</option>
+          <option value="4" {% if now.month == 4 %}selected{% endif %}>April</option>
+          <option value="5" {% if now.month == 5 %}selected{% endif %}>May</option>
+          <option value="6" {% if now.month == 6 %}selected{% endif %}>June</option>
+          <option value="7" {% if now.month == 7 %}selected{% endif %}>July</option>
+          <option value="8" {% if now.month == 8 %}selected{% endif %}>August</option>
+          <option value="9" {% if now.month == 9 %}selected{% endif %}>September</option>
+          <option value="10" {% if now.month == 10 %}selected{% endif %}>October</option>
+          <option value="11" {% if now.month == 11 %}selected{% endif %}>November</option>
+          <option value="12" {% if now.month == 12 %}selected{% endif %}>December</option>
+        </select>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="loadIomsBtn" class="btn btn-primary">Load IOMs</button>
       </div>
     </div>
 
-    <div style="width:320px;">
-      <label for="searchIom">Search IOM / Dept</label>
-      <input id="searchIom" class="form-control" placeholder="iom id or department">
-    </div>
-  </div>
-
-  <!-- IOM Details -->
-  <div id="iomDetailWrap" style="display:none;">
-    <div class="iom-card" role="region" aria-live="polite">
-      <div class="iom-left">
-        <div id="iomTitle" class="iom-title">IOM: —</div>
-        <div id="iomSubproject" class="iom-dept" style="margin-top:8px;">Subproject: <strong id="iomSubprojectName">—</strong></div>
-        <div id="iomDept" class="iom-dept">Department: —</div>
-        <div id="iomWbs" class="iom-dept">WBS: —</div>
-        <div id="iomSite" class="iom-dept">Site: —</div>
-        <div id="iomFunction" class="iom-dept">Function: —</div>
+    <!-- IOM Selection and Search -->
+    <div style="display:flex;gap:12px;align-items:flex-start;margin-top:8px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:360px;">
+        <label for="iomsDropdown">Applicable IOMs</label>
+        <div style="display:flex;gap:8px;">
+          <select id="iomsDropdown" class="form-select" style="flex:1;">
+            <option value="">-- Load IOMs then select --</option>
+          </select>
+          <button id="addIomBtn" class="btn btn-outline">Add Selected IOM</button>
+        </div>
       </div>
 
-      <div class="iom-right">
-        <div class="stat">Month FTE: <strong id="iomMonthFte">0.00</strong></div>
-        <div class="stat">Month Hrs: <strong id="iomMonthHrs">0.00</strong></div>
-        <div class="stat">Remaining FTE: <strong id="iomRemFte">0.00</strong></div>
-        <div class="stat">Remaining Hrs: <strong id="iomRemHrs">0.00</strong></div>
+      <div style="min-width:260px;">
+        <label for="searchIom">Search IOM / Dept</label>
+        <input id="searchIom" class="form-control" placeholder="iom id or department">
       </div>
     </div>
-  </div>
 
-  <!-- Resource Allocations -->
-  <div id="allocSectionWrap" style="display:none;">
-    <div style="display:flex; align-items:center; justify-content:space-between;">
-      <h3 class="section-title">Resource Allocations</h3>
-      <div id="allocBadge">Remaining: 0.00h</div>
-    </div>
-
-    <div class="table-wrap">
-      <table id="allocTable" class="table" aria-describedby="AllocationsForIom">
-        <thead>
-          <tr>
-            <!-- CHANGED: header to "Lead Name / Resource" while keeping LDAP hint -->
-            <th>Lead Name / Resource<div style="font-size:0.8rem;color:#94a3b8;">type 3+ chars to search</div></th>
-            <th style="width:130px">Total Hours</th>
-            <th style="width:120px">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="allocBody">
-          <tr class="empty-state"><td colspan="3" class="text-muted">No resources added yet. Add Selected IOM or use Add Resource.</td></tr>
-        </tbody>
-      </table>
-
-      <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
-        <button id="addResourceBtn" class="btn btn-outline btn-compact">Add Resource</button>
-
-        <div class="save-tooltip">
-          <button id="saveBtn" class="btn btn-primary btn-compact" aria-disabled="true" disabled>Save</button>
-          <div class="tooltip-text" id="saveTooltip">Fix highlighted rows first</div>
+    <!-- IOM Detail Card -->
+    <div id="iomDetailWrap" style="display:none;">
+      <div class="iom-card" role="region" aria-live="polite">
+        <div class="iom-left">
+          <div id="iomTitle" class="iom-title">IOM: —</div>
+          <div id="iomSubproject" class="iom-meta">Subproject: <strong id="iomSubprojectName">—</strong></div>
+          <div id="iomDept" class="iom-meta">Department: —</div>
+          <div id="iomWbs" class="iom-meta">WBS: —</div>
+          <div id="iomSite" class="iom-meta">Site: —</div>
+          <div id="iomFunction" class="iom-meta">Function: —</div>
         </div>
 
-        <button id="exportBtn" class="btn btn-success btn-compact">Export Excel</button>
+        <div class="iom-right" aria-hidden="false">
+          <div class="stat">Month FTE: <strong id="iomMonthFte">0.00</strong></div>
+          <div class="stat">Month Hrs: <strong id="iomMonthHrs">0.00</strong></div>
+          <div class="stat">Remaining FTE: <strong id="iomRemFte">0.00</strong></div>
+          <div class="stat">Remaining Hrs: <strong id="iomRemHrs">0.00</strong></div>
+          <div class="badge-remaining" id="remainingBadge">Remaining: 0.00h</div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- hidden csrf token for JS -->
-  <div style="display:none;">{% csrf_token %}</div>
+    <!-- Allocations -->
+    <div class="alloc-section">
+      <h3 style="margin-top:18px;">Resource Allocations</h3>
+      <div class="alloc-table-wrap">
+        <table class="table" id="allocTable" aria-describedby="allocations-for-iom">
+          <thead>
+            <tr>
+              <th style="width:58%;">Lead Name / Resource
+                <div class="small-muted" style="font-weight:600;font-size:0.9rem;">type 3+ chars to search</div>
+              </th>
+              <th style="width:18%;">Total Hours</th>
+              <th style="width:14%;">FTE</th>
+              <th style="width:10%;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="allocBody">
+            <tr class="empty-state"><td colspan="4" class="small-muted">No resources added yet. Add Selected IOM or use Add Resource.</td></tr>
+          </tbody>
+        </table>
+
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;">
+          <button id="addResourceBtn" class="btn btn-outline">Add Resource</button>
+          <div class="save-tooltip" style="position:relative;">
+            <button id="saveBtn" class="btn btn-primary" disabled aria-disabled="true">Save</button>
+            <div class="small-muted" id="saveHint" style="margin-left:8px;"></div>
+          </div>
+          <button id="exportBtn" class="btn btn-outline">Export Excel</button>
+        </div>
+      </div>
+    </div>
+
+    {# CSRF token hidden for JS use #}
+    <div style="display:none;">{% csrf_token %}</div>
+  </div>
 </div>
 
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
 <script>
+/* Monthly Allocations - Complete client-side JS */
+
 (function() {
-  // default (fallback) limit if server not giving month_limit
-  const DEFAULT_MONTHLY_LIMIT = parseFloat("{{ hours_available|default:183.75 }}") || 183.75;
+  // URLs (adjust names if your urls.py uses different names)
+  const GET_SUBPROJECTS_URL = '{% url "projects:api_subprojects" %}';
+  const GET_IOMS_URL = '{% url "projects:get_applicable_ioms" %}';
+  const GET_IOM_DETAILS_URL = '{% url "projects:get_iom_details" %}';
+  const GET_SAVED_ALLOC_URL = '{% url "projects:get_allocations_for_iom" %}';
+  const SAVE_ALLOC_URL = '{% url "projects:save_monthly_allocations" %}';
+  const EXPORT_URL = '{% url "projects:export_allocations" %}';
+  const LDAP_ENDPOINT = '{% url "projects:allocations_ldap_search" %}';
 
-  const CSRFTOKEN_ELEM = document.querySelector('[name="csrfmiddlewaretoken"]');
-  const CSRFTOKEN = CSRFTOKEN_ELEM ? CSRFTOKEN_ELEM.value : '';
+  // Defaults
+  const DEFAULT_BILLING_HOURS = parseFloat("{{ hours_available|default:183.75 }}") || 183.75;
 
-  // DOM refs
+  // DOM elements
   const projectSelect = document.getElementById('projectSelect');
-  const subprojectSelect = document.getElementById('subprojectSelect'); // NEW
+  const subprojectSelect = document.getElementById('subprojectSelect');
   const yearInput = document.getElementById('yearInput');
   const monthSelect = document.getElementById('monthSelect');
   const loadIomsBtn = document.getElementById('loadIomsBtn');
@@ -216,441 +211,478 @@
   const iomTitle = document.getElementById('iomTitle');
   const iomSubprojectName = document.getElementById('iomSubprojectName');
   const iomDept = document.getElementById('iomDept');
+  const iomWbs = document.getElementById('iomWbs');
+  const iomSite = document.getElementById('iomSite');
+  const iomFunction = document.getElementById('iomFunction');
   const iomMonthFte = document.getElementById('iomMonthFte');
   const iomMonthHrs = document.getElementById('iomMonthHrs');
   const iomRemFte = document.getElementById('iomRemFte');
   const iomRemHrs = document.getElementById('iomRemHrs');
-  const iomWbs = document.getElementById('iomWbs');
-  const iomSite = document.getElementById('iomSite');
-  const iomFunction = document.getElementById('iomFunction');
+  const remainingBadge = document.getElementById('remainingBadge');
 
-  const allocSectionWrap = document.getElementById('allocSectionWrap');
-  const allocBadge = document.getElementById('allocBadge');
   const allocBody = document.getElementById('allocBody');
   const addResourceBtn = document.getElementById('addResourceBtn');
   const saveBtn = document.getElementById('saveBtn');
-  const saveTooltip = document.getElementById('saveTooltip');
+  const saveHint = document.getElementById('saveHint');
   const exportBtn = document.getElementById('exportBtn');
 
-  // URLs (keep names consistent with your project urls / views)
-  const LDAP_ENDPOINT = '{% url "projects:allocations_ldap_search" %}';
-  const GET_IOMS_URL = '{% url "projects:get_applicable_ioms" %}';
-  const GET_IOM_DETAILS_URL = '{% url "projects:get_iom_details" %}';
-  const GET_SAVED_ALLOC_URL = '{% url "projects:get_allocations_for_iom" %}';
-  const SAVE_ALLOC_URL = '{% url "projects:save_monthly_allocations" %}';
-  const EXPORT_URL = '{% url "projects:export_allocations" %}';
-  // NEW: subprojects API (expects ?project_id or ?bg_code)
-  const GET_SUBPROJECTS_URL = '{% url "projects:api_subprojects" %}';
+  const toast = document.getElementById('toast');
 
-  // current month limit (per resource limit from DB)
-  let CURRENT_MONTH_LIMIT = DEFAULT_MONTHLY_LIMIT;
+  // state
+  let CURRENT_IOM = null; // canonical object returned by server for get_iom_details
+  let BILLING_HOURS = DEFAULT_BILLING_HOURS;
 
-  function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  // CSRF token helper
+  function getCsrfToken() {
+    const el = document.querySelector('[name="csrfmiddlewaretoken"]');
+    return el ? el.value : '';
+  }
 
-  // Load IOMs from server (includes month_limit now)
+  function showToast(msg, timeout=3000) {
+    toast.textContent = msg;
+    toast.style.display = 'block';
+    setTimeout(() => { toast.style.display = 'none'; }, timeout);
+  }
+
+  function escapeHtml(s) {
+    if (s === undefined || s === null) return '';
+    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+
+  // --- SUBPROJECTS ---
+
+  async function loadSubprojects(project_id, preserveValue) {
+    if (!project_id) {
+      subprojectSelect.innerHTML = '<option value="">-- Select Subproject (optional) --</option>';
+      return;
+    }
+    try {
+      // Prefer bg_code from selected option
+      const selectedOpt = projectSelect.selectedOptions && projectSelect.selectedOptions[0];
+      const bgCode = selectedOpt ? (selectedOpt.dataset.bg || '').trim() : '';
+      const params = new URLSearchParams();
+      if (bgCode) params.set('bg_code', bgCode);
+      else params.set('project_id', project_id);
+
+      const res = await fetch(GET_SUBPROJECTS_URL + '?' + params.toString(), { credentials: 'same-origin' });
+      const data = await res.json();
+      subprojectSelect.innerHTML = '<option value="">-- Select Subproject (optional) --</option>';
+      if (data && data.subprojects && data.subprojects.length) {
+        data.subprojects.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          opt.text = (s.name || '') + (s.mdm_code ? (' · ' + s.mdm_code) : '');
+          subprojectSelect.appendChild(opt);
+        });
+        if (preserveValue) {
+          try { subprojectSelect.value = preserveValue; } catch(e){}
+        }
+      } else {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.text = '-- No subprojects found --';
+        subprojectSelect.appendChild(opt);
+      }
+    } catch (err) {
+      console.error('loadSubprojects', err);
+      showToast('Failed to load subprojects');
+    }
+  }
+
+  // load on project change
+  projectSelect.addEventListener('change', () => {
+    const pid = projectSelect.value;
+    // user intentionally changed project: do not preserve previous subproject
+    loadSubprojects(pid, '');
+    // clear current IOM & allocations, since project changed
+    CURRENT_IOM = null;
+    iomDetailWrap.style.display = 'none';
+    clearAllocRows();
+    iomsDropdown.innerHTML = '<option value="">-- Load IOMs then select --</option>';
+  });
+
+  // initial load of subprojects for pre-selected project
+  if (projectSelect.value) {
+    loadSubprojects(projectSelect.value, subprojectSelect.value || '');
+  }
+
+  // --- IOMs loading ---
+
   async function loadIoms() {
     const project_id = projectSelect.value;
+    if (!project_id) { showToast('Select a project first'); return; }
     const year = yearInput.value || (new Date()).getFullYear();
     const month = monthSelect.value;
-    const search = searchIom.value.trim();
+    const search = (searchIom.value || '').trim();
     const subproject_id = subprojectSelect.value || '';
 
-    if (!project_id) { alert('Please select a project'); return; }
-
-    // preserve current subproject selection so Load IOMs doesn't clear it
-    const preservedSubproject = subprojectSelect ? subprojectSelect.value : '';
+    // preserve subproject selection across load
+    const preserve = subprojectSelect.value || '';
 
     const params = new URLSearchParams({ project_id, year, month });
     if (search) params.set('search', search);
     if (subproject_id) params.set('subproject_id', subproject_id);
 
     try {
-      const res = await fetch(GET_IOMS_URL + '?' + params.toString(), { credentials: 'same-origin' });
+      const url = GET_IOMS_URL + '?' + params.toString();
+      const res = await fetch(url, { credentials: 'same-origin' });
       const data = await res.json();
-      if (!data.ok) {
-        console.warn('get_applicable_ioms error', data);
-        alert('Could not load IOMs (see console)');
-        return;
-      }
+      if (!data.ok) { showToast('Failed to load IOMs'); console.warn(data); return; }
       iomsDropdown.innerHTML = '<option value="">-- Choose IOM --</option>';
-      data.ioms.forEach(iom => {
+      (data.ioms || []).forEach(iom => {
         const opt = document.createElement('option');
-        opt.value = JSON.stringify(iom);  // store row
+        opt.value = JSON.stringify(iom);
         opt.text = `${iom.iom_id} · Dept:${iom.department || '-'} · Hrs:${(parseFloat(iom.month_hours||0)).toFixed(2)}`;
         iomsDropdown.appendChild(opt);
       });
-      // Also load subprojects for the selected project (keeps dropdown in sync)
-      // pass preservedSubproject to avoid clearing user selection
-      await loadSubprojects(project_id, preservedSubproject);
+
+      // re-load subprojects and preserve selection
+      await loadSubprojects(project_id, preserve);
+      showToast('IOMs loaded', 1200);
     } catch (err) {
       console.error('loadIoms', err);
-      alert('Failed to load IOMs (console).');
+      showToast('Error loading IOMs');
     }
   }
 
   loadIomsBtn.addEventListener('click', loadIoms);
 
-  /**
-   * loadSubprojects(project_id, preserveValue)
-   * - prefers sending bg_code if available via data-bg on selected option
-   * - populates subprojectSelect
-   * - if preserveValue provided and exists in new list, re-select it
-   */
-  async function loadSubprojects(project_id, preserveValue) {
-    if (!project_id) return;
-    try {
-      // Try to read bg_code from the selected option attribute (preferred)
-      const projSel = document.getElementById('projectSelect');
-      const selectedOpt = projSel ? projSel.selectedOptions[0] : null;
-      const bg_code = selectedOpt ? (selectedOpt.dataset.bg || '').trim() : '';
-
-      // Prepare URL and prefer bg_code param
-      const url = new URL(GET_SUBPROJECTS_URL, window.location.origin);
-      if (bg_code) {
-        url.searchParams.set('bg_code', bg_code);
-      } else {
-        // fallback for older API expecting project_id
-        url.searchParams.set('project_id', project_id);
-      }
-
-      const res = await fetch(url.toString(), { credentials: 'same-origin' });
-      if (!res.ok) {
-        console.warn('loadSubprojects: non-OK response', res.status);
-        return;
-      }
-      const data = await res.json();
-
-      // remember current selection if preserveValue not provided
-      const prev = (typeof preserveValue !== 'undefined' && preserveValue !== null) ? preserveValue : (subprojectSelect ? subprojectSelect.value : '');
-
-      const sel = document.getElementById('subprojectSelect');
-      sel.innerHTML = '<option value="">-- Select Subproject (optional) --</option>';
-      if (data && data.subprojects && data.subprojects.length) {
-        data.subprojects.forEach(s => {
-          const opt = document.createElement('option');
-          opt.value = s.id;
-          // show name and mdm_code/bg code for clarity
-          opt.text = s.name + (s.mdm_code ? ` · ${s.mdm_code}` : '');
-          sel.appendChild(opt);
-        });
-        // try to re-select previous value if present
-        if (prev) {
-          const found = Array.from(sel.options).some(o => {
-            if (o.value === prev) { sel.value = prev; return true; }
-            return false;
-          });
-          // optionally if prev was not found attempt matching by text if prev looked like text
-        }
-      } else {
-        // no matching subprojects
-        const none = document.createElement('option');
-        none.value = '';
-        none.text = '-- No subprojects found --';
-        sel.appendChild(none);
-      }
-    } catch (err) {
-      console.warn('loadSubprojects error', err);
-    }
-  }
-
-  // when project changes, update subproject dropdown automatically (user changed project -> clear selection)
-  projectSelect.addEventListener('change', () => {
-    const pid = projectSelect.value;
-    if (pid) loadSubprojects(pid); // do not preserve here; user intentionally changed project
-  });
-
-  // when user selects an IOM from dropdown, fetch authoritative IOM details from server
-  iomsDropdown.addEventListener('change', async function() {
-    if (!this.value) {
-      iomDetailWrap.style.display = 'none';
-      return;
-    }
+  // when user selects an IOM from dropdown, fetch canonical details
+  iomsDropdown.addEventListener('change', function() {
+    if (!this.value) { CURRENT_IOM = null; iomDetailWrap.style.display = 'none'; clearAllocRows(); return; }
     const obj = JSON.parse(this.value);
-    // call server to get authoritative details (month_fte, month_hours, remaining, month_limit)
-    await fetchIomDetails(obj.iom_id);
+    fetchIomDetails(obj.iom_id);
   });
 
-  // show IOM preview (object must contain fields from server)
-  function showIomPreview(iom) {
-    iomTitle.textContent = 'IOM: ' + (iom.iom_id || '');
-    iomDept.textContent = 'Department: ' + (iom.department || '—');
-
-    const buyer = iom.buyer_wbs_cc || '-';
-    const seller = iom.seller_wbs_cc || '-';
-    iomWbs.textContent = 'WBS: ' + buyer + ' / ' + seller;
-
-    iomSite.textContent = 'Site: ' + (iom.site || '—');
-    iomFunction.textContent = 'Function: ' + (iom.function || '—');
-
-    // show FTE with 2 decimal precision as requested (hours remain 2-decimal)
-    iomMonthFte.textContent = (parseFloat(iom.month_fte||0)).toFixed(2);
-    iomMonthHrs.textContent = (parseFloat(iom.month_hours||0)).toFixed(2);
-
-    // remaining values from server (we update both kv and badge)
-    iomRemFte.textContent = (parseFloat(iom.remaining_fte||0)).toFixed(2);
-    iomRemHrs.textContent = (parseFloat(iom.remaining_hours||0)).toFixed(2);
-
-    // set current month limit (per-resource limit)
-    CURRENT_MONTH_LIMIT = parseFloat(iom.month_limit || DEFAULT_MONTHLY_LIMIT);
-
-    // update allocation badge
-    allocBadge.textContent = 'Remaining: ' + (parseFloat(iom.remaining_hours||0)).toFixed(2) + 'h';
-
-    iomDetailWrap.style.display = 'block';
-  }
-
-  // Add Selected IOM -> show details & load saved allocations (authoritative fetch)
-  addIomBtn.addEventListener('click', async function() {
-    if (!iomsDropdown.value) { alert('Please choose an IOM first'); return; }
-    const selected = JSON.parse(iomsDropdown.value);
-    // fetch authoritative details and then load saved allocations
-    await fetchIomDetails(selected.iom_id);
-    // show selected subproject name in the IOM details (if any)
-    const sp = (subprojectSelect && subprojectSelect.selectedOptions && subprojectSelect.selectedOptions[0]) ? subprojectSelect.selectedOptions[0].textContent : '';
-    iomSubprojectName.textContent = sp || '—';
-
-    allocSectionWrap.style.display = 'block';
-    allocBody.innerHTML = ''; // clear previous rows
-    // load saved rows for the selected IOM
-    await loadSavedAllocations(selected.iom_id);
-    validateAll();
+  // Add Selected IOM -> show details and load saved allocations
+  addIomBtn.addEventListener('click', function() {
+    if (!iomsDropdown.value) { showToast('Choose an IOM to add'); return; }
+    const obj = JSON.parse(iomsDropdown.value);
+    fetchIomDetails(obj.iom_id);
   });
 
-  // fetch IOM details (from server) and show them
+  // --- fetch IOM details (server authoritative) ---
   async function fetchIomDetails(iom_row_id) {
-    try {
-      const project_id = projectSelect.value;
-      const year = yearInput.value;
-      const month = monthSelect.value;
-      if (!project_id || !iom_row_id) return;
-      const url = new URL(GET_IOM_DETAILS_URL, window.location.origin);
-      url.searchParams.set('project_id', project_id);
-      url.searchParams.set('iom_row_id', iom_row_id);
-      url.searchParams.set('year', year);
-      url.searchParams.set('month', month);
-      const res = await fetch(url.toString(), { credentials: 'same-origin' });
-      if (!res.ok) {
-        console.warn('fetchIomDetails failed', res.status);
-        return;
-      }
-      const data = await res.json();
-      if (!data.ok) {
-        console.warn('fetchIomDetails server responded not ok', data);
-        return;
-      }
-      const iom = data.iom;
-      if (iom) {
-        // server response includes month_limit and remaining fields (see updated view)
-        showIomPreview(iom);
-      }
-    } catch (err) {
-      console.warn('fetchIomDetails', err);
-    }
-  }
-
-  // Load saved allocations for an iom_id (string)
-  async function loadSavedAllocations(iom_id) {
     const project_id = projectSelect.value;
-    const month_start = `${yearInput.value}-${String(monthSelect.value).padStart(2,'0')}-01`;
-    if (!project_id || !iom_id) return;
+    const year = yearInput.value || (new Date()).getFullYear();
+    const month = monthSelect.value;
+    if (!project_id || !iom_row_id) return;
     try {
-      const url = new URL(GET_SAVED_ALLOC_URL, window.location.origin);
-      url.searchParams.set('project_id', project_id);
-      url.searchParams.set('iom_row_id', iom_id);  // pass string identifier
-      url.searchParams.set('month_start', month_start);
-      const res = await fetch(url.toString(), { credentials: 'same-origin' });
-      if (!res.ok) { console.warn('loadSavedAllocations failed', res.status); return; }
+      const params = new URLSearchParams({ project_id, iom_row_id, year, month });
+      const res = await fetch(GET_IOM_DETAILS_URL + '?' + params.toString(), { credentials: 'same-origin' });
       const data = await res.json();
-      if (!data.ok) { console.warn('loadSavedAllocations server', data); return; }
-      allocBody.innerHTML = '';
-      const saved = data.saved_items || [];
-      if (saved.length === 0) {
-        allocBody.innerHTML = '<tr class="empty-state"><td colspan="3" class="text-muted">No resources assigned yet.</td></tr>';
-      } else {
-        saved.forEach(s => {
-          addResourceRow(iom_id, { ldap: s.user_ldap, hours: parseFloat(s.total_hours || 0) });
-        });
-      }
-      validateAll();
+      if (!data.ok) { showToast('Could not fetch IOM details'); console.warn(data); return; }
+      CURRENT_IOM = data.iom || null;
+      // billing hours for FTE calculation - use month_limit if provided, else default
+      BILLING_HOURS = parseFloat(CURRENT_IOM.month_limit || "{{ hours_available|default:'183.75' }}") || DEFAULT_BILLING_HOURS;
+      // show IOM
+      showIomPreview(CURRENT_IOM);
+      // load saved allocations for this IOM; server will return canonical month_start/billing_start
+      await loadSavedAllocations(project_id, CURRENT_IOM.iom_id, CURRENT_IOM.billing_start || null);
     } catch (err) {
-      console.error('loadSavedAllocations', err);
+      console.error('fetchIomDetails', err);
+      showToast('Error fetching IOM details');
     }
   }
 
-  // Add resource row - left aligned
-  function addResourceRow(iom_id, prefill = {}) {
-    const empty = allocBody.querySelector('.empty-state');
-    if (empty) empty.remove();
+  function showIomPreview(iom) {
+    if (!iom) { iomDetailWrap.style.display = 'none'; return; }
+    iomDetailWrap.style.display = 'block';
+    iomTitle.textContent = 'IOM: ' + (iom.iom_id || '');
+    iomSubprojectName.textContent = (subprojectSelect.selectedOptions[0] && subprojectSelect.selectedOptions[0].text) ? subprojectSelect.selectedOptions[0].text : '';
+    iomDept.textContent = 'Department: ' + (iom.department || '-');
+    iomWbs.textContent = 'WBS: ' + (iom.buyer_wbs_cc || '-') + ' / ' + (iom.seller_wbs_cc || '-');
+    iomSite.textContent = 'Site: ' + (iom.site || '-');
+    iomFunction.textContent = 'Function: ' + (iom.function || '-');
 
+    iomMonthFte.textContent = Number(iom.month_fte || 0).toFixed(2);
+    iomMonthHrs.textContent = Number(iom.month_hours || 0).toFixed(2);
+    iomRemFte.textContent = Number(iom.remaining_fte || 0).toFixed(2);
+    iomRemHrs.textContent = Number(iom.remaining_hours || 0).toFixed(2);
+    remainingBadge.textContent = 'Remaining: ' + (Number(iom.remaining_hours || 0)).toFixed(2) + 'h';
+  }
+
+  // --- ALLOCATIONS table helpers ---
+
+  function clearAllocRows() {
+    allocBody.innerHTML = '<tr class="empty-state"><td colspan="4" class="small-muted">No resources added yet. Add Selected IOM or use Add Resource.</td></tr>';
+    saveBtn.disabled = true;
+    saveBtn.setAttribute('aria-disabled', 'true');
+    saveHint.textContent = '';
+  }
+
+  function createAllocRow(user_ldap='', total_hours='') {
     const tr = document.createElement('tr');
-    tr.dataset.parentIom = iom_id;
-    tr.innerHTML = `
-      <td class="resource-td">
-        <input type="text" class="form-control user_ldap" placeholder="start typing (3+ chars)" value="${escapeHtml(prefill.ldap||'')}" />
-        <div class="ldap-suggest" style="display:none; position:absolute; left:0; top:44px; z-index:1200; background:#fff; border:1px solid #eef2f7; border-radius:8px; max-height:220px; overflow:auto;"></div>
-      </td>
-      <td><input type="number" class="form-control resource-hours" step="0.25" min="0" value="${(typeof prefill.hours !== 'undefined') ? parseFloat(prefill.hours).toFixed(2) : '0.00'}" /></td>
-      <td class="remove-td"><button class="btn btn-outline btn-compact removeBtn">Remove</button></td>
-    `;
-    allocBody.appendChild(tr);
+
+    // resource cell with LDAP input
+    const tdUser = document.createElement('td');
+    const inpUser = document.createElement('input');
+    inpUser.type = 'text';
+    inpUser.className = 'form-control user-ldap';
+    inpUser.placeholder = 'type 3+ chars to search';
+    inpUser.value = user_ldap || '';
+    tdUser.appendChild(inpUser);
+    tr.appendChild(tdUser);
+
+    // total hours
+    const tdHours = document.createElement('td');
+    const inpHours = document.createElement('input');
+    inpHours.type = 'number';
+    inpHours.className = 'form-control hours-input';
+    inpHours.step = '0.25';
+    inpHours.min = '0';
+    inpHours.value = (total_hours !== undefined && total_hours !== null) ? Number(total_hours).toFixed(2) : '';
+    tdHours.appendChild(inpHours);
+    tr.appendChild(tdHours);
+
+    // FTE read-only
+    const tdFte = document.createElement('td');
+    const inpFte = document.createElement('input');
+    inpFte.type = 'text';
+    inpFte.className = 'form-control fte-display readonly';
+    inpFte.readOnly = true;
+    inpFte.value = computeFteForValue(inpHours.value || 0);
+    tdFte.appendChild(inpFte);
+    tr.appendChild(tdFte);
+
+    // actions
+    const tdActions = document.createElement('td');
+    const rmBtn = document.createElement('button');
+    rmBtn.type = 'button';
+    rmBtn.className = 'btn btn-link text-danger remove-row';
+    rmBtn.textContent = 'Remove';
+    tdActions.appendChild(rmBtn);
+    tr.appendChild(tdActions);
 
     // events
-    tr.querySelector('.removeBtn').addEventListener('click', () => { tr.remove(); validateAll(); });
-    tr.querySelector('.resource-hours').addEventListener('input', () => { validateAll(); });
-
-    // LDAP autocomplete
-    const ldapInput = tr.querySelector('.user_ldap');
-    const suggestBox = tr.querySelector('.ldap-suggest');
-    let timer = null;
-    ldapInput.addEventListener('input', () => {
-      const q = ldapInput.value.trim();
-      suggestBox.innerHTML = ''; suggestBox.style.display = 'none';
-      if (timer) clearTimeout(timer);
-      if (q.length < 3) return;
-      timer = setTimeout(async () => {
-        try {
-          const url = new URL(LDAP_ENDPOINT, window.location.origin);
-          url.searchParams.set('q', q);
-          const r = await fetch(url.toString(), { credentials: 'same-origin' });
-          if (!r.ok) return;
-          const d = await r.json();
-          if (!d || !Array.isArray(d.results)) return;
-          d.results.slice(0, 40).forEach(u => {
-            const a = document.createElement('a');
-            a.href = '#';
-            a.style.display = 'block';
-            a.style.padding = '8px';
-            a.style.borderBottom = '1px solid #f1f5f9';
-            a.textContent = (u.cn || u.sAMAccountName) + (u.mail ? ' <' + u.mail + '>' : '');
-            a.dataset.mail = u.mail || u.sAMAccountName || '';
-            a.addEventListener('click', (ev) => { ev.preventDefault(); ldapInput.value = a.dataset.mail; suggestBox.style.display = 'none'; validateAll(); });
-            suggestBox.appendChild(a);
-          });
-          if (suggestBox.children.length) suggestBox.style.display = 'block';
-        } catch (err) { console.error('ldap', err); }
-      }, 180);
+    rmBtn.addEventListener('click', () => { tr.remove(); if (!allocBody.querySelector('tr')) clearAllocRows(); validateAll(); });
+    inpHours.addEventListener('input', () => {
+      inpFte.value = computeFteForValue(inpHours.value || 0);
+      validateAll();
     });
 
-    document.addEventListener('click', (ev) => { if (!tr.contains(ev.target)) suggestBox.style.display = 'none'; });
-    validateAll();
+    // LDAP autocomplete (simple): call LDAP_ENDPOINT?q=...
+    let ldapTimer = null;
+    let suggestionBox = null;
+    inpUser.addEventListener('input', (ev) => {
+      const q = inpUser.value.trim();
+      if (ldapTimer) clearTimeout(ldapTimer);
+      if (!q || q.length < 3) {
+        if (suggestionBox) suggestionBox.remove();
+        return;
+      }
+      ldapTimer = setTimeout(async () => {
+        try {
+          // create suggestion box if not exists
+          if (!suggestionBox) {
+            suggestionBox = document.createElement('div');
+            suggestionBox.style.position = 'absolute';
+            suggestionBox.style.background = '#fff';
+            suggestionBox.style.border = '1px solid #eef2f7';
+            suggestionBox.style.zIndex = 1200;
+            suggestionBox.style.maxHeight = '220px';
+            suggestionBox.style.overflow = 'auto';
+            suggestionBox.style.width = inpUser.offsetWidth + 'px';
+            suggestionBox.style.borderRadius = '6px';
+            suggestionBox.style.boxShadow = '0 8px 24px rgba(2,6,23,0.08)';
+            inpUser.parentElement.style.position = 'relative';
+            inpUser.parentElement.appendChild(suggestionBox);
+          }
+          suggestionBox.innerHTML = '<div style="padding:8px;color:#6b7280;">Searching...</div>';
+          const u = new URL(LDAP_ENDPOINT, window.location.origin);
+          u.searchParams.set('q', q);
+          const r = await fetch(u.toString(), { credentials: 'same-origin' });
+          const d = await r.json();
+          suggestionBox.innerHTML = '';
+          if (!d || !Array.isArray(d.results) || d.results.length === 0) {
+            suggestionBox.innerHTML = '<div style="padding:8px;color:#6b7280;">No results</div>';
+            return;
+          }
+          d.results.slice(0, 25).forEach(uinfo => {
+            const a = document.createElement('div');
+            a.style.padding = '8px 10px';
+            a.style.borderBottom = '1px solid #f1f5f9';
+            a.style.cursor = 'pointer';
+            a.textContent = (uinfo.cn || uinfo.displayName || uinfo.sAMAccountName || '') + (uinfo.mail ? ' <' + uinfo.mail + '>' : '');
+            a.addEventListener('click', (ev) => {
+              inpUser.value = uinfo.mail || uinfo.sAMAccountName || uinfo.cn || '';
+              if (suggestionBox) suggestionBox.remove();
+              suggestionBox = null;
+              validateAll();
+            });
+            suggestionBox.appendChild(a);
+          });
+        } catch (err) {
+          console.error('ldap search', err);
+          if (suggestionBox) suggestionBox.innerHTML = '<div style="padding:8px;color:#6b7280;">Error</div>';
+        }
+      }, 200);
+    });
+
+    // remove suggestion box when clicking outside
+    document.addEventListener('click', (ev) => {
+      if (suggestionBox && !inpUser.parentElement.contains(ev.target)) {
+        suggestionBox.remove();
+        suggestionBox = null;
+      }
+    });
+
     return tr;
   }
 
   addResourceBtn.addEventListener('click', () => {
-    if (!iomsDropdown.value) { alert('Please select and add an IOM first'); return; }
-    const currentIom = JSON.parse(iomsDropdown.value);
-    addResourceRow(currentIom.iom_id);
+    // if empty-state row present, remove it
+    const empty = allocBody.querySelector('.empty-state');
+    if (empty) empty.remove();
+    allocBody.appendChild(createAllocRow('', ''));
+    validateAll();
   });
 
-  // Validation & Remaining calculation
-  function validateAll() {
-    const currentIom = iomsDropdown.value ? JSON.parse(iomsDropdown.value) : null;
-    const totalAvailable = currentIom ? Number(currentIom.month_hours || 0) : 0;
-
-    const rows = Array.from(allocBody.querySelectorAll('tr')).filter(r => r.dataset && r.dataset.parentIom);
-    let sum = 0;
-    let anyInvalid = false;
-    const reasons = [];
-
-    rows.forEach(r => {
-      r.classList.remove('row-invalid');
-      const ldapVal = (r.querySelector('.user_ldap') || {}).value || '';
-      const hoursVal = parseFloat((r.querySelector('.resource-hours') || {}).value || 0) || 0;
-
-      const rowErrors = [];
-      if (!ldapVal.trim()) rowErrors.push('missing resource');
-      if (!(hoursVal > 0)) rowErrors.push('hours <= 0');
-
-      // per-resource month limit: CURRENT_MONTH_LIMIT
-      if (hoursVal > CURRENT_MONTH_LIMIT + 0.0001) rowErrors.push(`> ${CURRENT_MONTH_LIMIT}h`);
-
-      if (rowErrors.length) {
-        r.classList.add('row-invalid'); anyInvalid = true; reasons.push(rowErrors.join(', '));
-      }
-      // Ensure numeric 2-decimal sum (but don't mutate displayed value)
-      sum += Math.round(hoursVal * 100) / 100;
-    });
-
-    const remaining = Math.max(0, Math.round((totalAvailable - sum) * 100) / 100);
-    allocBadge.textContent = 'Remaining: ' + remaining.toFixed(2) + 'h';
-    if (iomRemHrs) iomRemHrs.textContent = remaining.toFixed(2);
-
-    const hasRows = rows.length > 0;
-    const overAllocated = sum > totalAvailable + 0.0001;
-    const sumIsZero = sum === 0;
-
-    let disable = false;
-    let tooltipMsg = '';
-    if (!hasRows) { disable = true; tooltipMsg = 'No resource rows added'; }
-    else if (anyInvalid) { disable = true; tooltipMsg = 'Fix highlighted rows'; }
-    else if (overAllocated) { disable = true; tooltipMsg = 'Allocated hours exceed available hours'; }
-    else if (sumIsZero) { disable = true; tooltipMsg = 'Enter hours for at least one resource'; }
-
-    saveBtn.disabled = disable;
-    saveBtn.setAttribute('aria-disabled', disable ? 'true' : 'false');
-    saveTooltip.textContent = tooltipMsg || '';
-
-    return { valid: !disable, remaining, sum, totalAvailable, overAllocated };
+  // compute FTE = hours / BILLING_HOURS
+  function computeFteForValue(hoursVal) {
+    const h = parseFloat(hoursVal) || 0;
+    const b = parseFloat(BILLING_HOURS || DEFAULT_BILLING_HOURS) || DEFAULT_BILLING_HOURS;
+    const f = b > 0 ? (h / b) : 0;
+    // round to 4 decimals
+    const r = Math.round(f * 10000) / 10000;
+    return r.toFixed(4);
   }
 
-  // Save allocations to server
-  async function saveAllocations() {
-    const validation = validateAll();
-    if (!validation.valid) { alert('Cannot save: ' + (saveTooltip.textContent || 'fix errors')); return; }
-
-    // gather rows (keep decimals)
-    const rows = Array.from(allocBody.querySelectorAll('tr')).filter(r => r.dataset && r.dataset.parentIom);
-    const items = rows.map(r => {
-      const hoursRaw = parseFloat((r.querySelector('.resource-hours') || {}).value || 0) || 0;
-      // preserve 2 decimal places
-      const hours2 = Math.round(hoursRaw * 100) / 100;
-      return {
-        iom_id: r.dataset.parentIom,
-        user_ldap: (r.querySelector('.user_ldap') || {}).value || '',
-        total_hours: hours2
-      };
-    });
-
-    const project_id = projectSelect.value;
-    const subproject_id = subprojectSelect.value || null; // include if selected
-    const month_start = `${yearInput.value}-${String(monthSelect.value).padStart(2,'0')}-01`;
-
+  // load saved allocations for iom
+  async function loadSavedAllocations(project_id, iom_id, month_start) {
+    clearAllocRows();
+    if (!project_id || !iom_id) return;
     try {
-      const resp = await fetch(SAVE_ALLOC_URL, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRFTOKEN },
-        body: JSON.stringify({ project_id, subproject_id, month_start, items })
-      });
-      const data = await resp.json();
-      if (!data.ok) {
-        alert('Save failed: ' + (data.error || 'server error'));
-        console.error('save response', data);
+      const params = new URLSearchParams({ project_id, iom_row_id: iom_id });
+      if (month_start) params.set('month_start', month_start);
+      const res = await fetch(GET_SAVED_ALLOC_URL + '?' + params.toString(), { credentials: 'same-origin' });
+      const data = await res.json();
+      if (!data.ok) { console.warn('get_allocations_for_iom', data); return; }
+      const saved = data.saved_items || [];
+      if (!saved.length) {
+        clearAllocRows();
         return;
       }
-
-      // Re-render saved rows returned by server (expecting saved grouped by iom_id)
-      if (data.saved && typeof data.saved === 'object') {
-        Object.keys(data.saved).forEach(iomId => {
-          // remove any existing rows for iomId and render saved rows
-          const existing = Array.from(allocBody.querySelectorAll('tr')).filter(r => r.dataset && r.dataset.parentIom === iomId);
-          existing.forEach(r => r.remove());
-          (data.saved[iomId] || []).forEach(s => addResourceRow(iomId, { ldap: s.user_ldap, hours: s.total_hours }));
-        });
-        validateAll();
-        // update IOM details by fetching fresh details (refresh remaining & month_limit)
-        Object.keys(data.saved).forEach(iomId => fetchIomDetails(iomId));
-        alert('Allocations saved successfully');
-      } else {
-        // fallback: reload saved for currently selected iom
-        if (iomsDropdown.value) {
-          const cur = JSON.parse(iomsDropdown.value);
-          await loadSavedAllocations(cur.iom_id);
+      // clear and add rows
+      allocBody.innerHTML = '';
+      saved.forEach(item => {
+        const row = createAllocRow(item.user_ldap || '', item.total_hours || 0);
+        const fteInput = row.querySelector('.fte-display');
+        if (item.fte !== undefined && item.fte !== null) {
+          fteInput.value = parseFloat(item.fte).toFixed(4);
+        } else {
+          fteInput.value = computeFteForValue(item.total_hours || 0);
         }
-        validateAll();
-        alert('Saved (server returned fallback format).');
-      }
+        allocBody.appendChild(row);
+      });
+      validateAll();
+    } catch (err) {
+      console.error('loadSavedAllocations', err);
+      showToast('Failed to load saved allocations');
+    }
+  }
 
+  // validate totals: compare sum of hours to CURRENT_IOM.month_hours
+  function validateAll() {
+    const rows = Array.from(allocBody.querySelectorAll('tr')).filter(r => !r.classList.contains('empty-state'));
+    let sum = 0;
+    rows.forEach(r => {
+      const v = parseFloat((r.querySelector('.hours-input') || {}).value || 0) || 0;
+      sum += v;
+      r.classList.remove('row-over');
+    });
+
+    // default: valid
+    let valid = true;
+    let hint = '';
+
+    let iomTotal = 0;
+    if (CURRENT_IOM && (CURRENT_IOM.month_hours !== undefined)) {
+      iomTotal = parseFloat(CURRENT_IOM.month_hours || 0) || 0;
+    }
+
+    if (iomTotal > 0 && sum > iomTotal + 0.0001) {
+      // exceed
+      rows.forEach(r => r.classList.add('row-over'));
+      valid = false;
+      hint = `Total allocated ${sum.toFixed(2)}h exceeds IOM total ${iomTotal.toFixed(2)}h`;
+    }
+
+    // per-row checks: ensure username present and hours > 0 (optional)
+    rows.forEach(r => {
+      const u = (r.querySelector('.user-ldap') || {}).value || '';
+      const h = parseFloat((r.querySelector('.hours-input') || {}).value || 0) || 0;
+      if (!u || !(h > 0)) {
+        valid = false;
+        hint = hint || 'Each row must have a resource and hours > 0';
+      }
+    });
+
+    saveBtn.disabled = !valid;
+    saveBtn.setAttribute('aria-disabled', (!valid).toString());
+    saveHint.textContent = hint;
+    return valid;
+  }
+
+  // save allocations to server
+  async function saveAllocations() {
+    if (!CURRENT_IOM) { showToast('Select IOM first'); return; }
+    if (!validateAll()) { alert('Fix validation errors before saving'); return; }
+
+    const project_id = projectSelect.value;
+    const subproject_id = subprojectSelect.value || null;
+    const month_start = (CURRENT_IOM && CURRENT_IOM.billing_start) ? CURRENT_IOM.billing_start : null;
+
+    const items = [];
+    const rows = Array.from(allocBody.querySelectorAll('tr')).filter(r => !r.classList.contains('empty-state'));
+    rows.forEach(r => {
+      const user = (r.querySelector('.user-ldap') || {}).value || '';
+      const hrs = parseFloat((r.querySelector('.hours-input') || {}).value || 0) || 0;
+      if (user && hrs > 0) {
+        items.push({ iom_id: CURRENT_IOM.iom_id, user_ldap: user, total_hours: hrs });
+      }
+    });
+
+    if (!items.length) { showToast('Add at least one resource'); return; }
+
+    const payload = { project_id: project_id, subproject_id: subproject_id, month_start: month_start, items: items };
+
+    try {
+      const res = await fetch(SAVE_ALLOC_URL, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCsrfToken()
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        console.warn('save_monthly_allocations', data);
+        alert('Save failed: ' + (data.error || 'server error'));
+        return;
+      }
+      // update UI with saved items (server returns saved_items list with fte)
+      if (data.saved_items && Array.isArray(data.saved_items)) {
+        allocBody.innerHTML = '';
+        data.saved_items.forEach(it => {
+          const row = createAllocRow(it.user_ldap || '', it.total_hours || 0);
+          const fteInput = row.querySelector('.fte-display');
+          if (it.fte !== undefined && it.fte !== null) {
+            fteInput.value = parseFloat(it.fte).toFixed(4);
+          } else {
+            fteInput.value = computeFteForValue(it.total_hours || 0);
+          }
+          allocBody.appendChild(row);
+        });
+      }
+      showToast('Allocations saved', 1800);
+      validateAll();
+      // refresh iom details
+      if (CURRENT_IOM && CURRENT_IOM.iom_id) {
+        fetchIomDetails(CURRENT_IOM.iom_id);
+      }
     } catch (err) {
       console.error('saveAllocations', err);
       alert('Save failed (see console)');
@@ -659,21 +691,29 @@
 
   saveBtn.addEventListener('click', saveAllocations);
 
-  // export allocations to excel (server does openpyxl)
-  exportBtn.addEventListener('click', function() {
-    if (!iomsDropdown.value) { alert('Select and add an IOM first'); return; }
-    const current = JSON.parse(iomsDropdown.value);
-    const project_id = projectSelect.value;
-    const iom_id = current.iom_id;
-    const month_start = `${yearInput.value}-${String(monthSelect.value).padStart(2,'0')}-01`;
-    const params = new URLSearchParams({ project_id, iom_id, month_start });
-    window.location = EXPORT_URL + '?' + params.toString();
+  // export
+  exportBtn.addEventListener('click', () => {
+    if (!CURRENT_IOM) { showToast('Select IOM first'); return; }
+    const params = new URLSearchParams({
+      project_id: projectSelect.value,
+      iom_id: CURRENT_IOM.iom_id,
+      month_start: (CURRENT_IOM.billing_start || '')
+    });
+    window.open(EXPORT_URL + '?' + params.toString(), '_blank');
   });
 
-  // init
-  (function init() {
-    // optionally auto-load IOMs for default project
-  })();
+  // initial state
+  clearAllocRows();
+
+  // recompute validation on month change (billing may change)
+  monthSelect.addEventListener('change', () => {
+    if (CURRENT_IOM && CURRENT_IOM.iom_id) {
+      // re-fetch to get canonical billing_limit for new month
+      fetchIomDetails(CURRENT_IOM.iom_id);
+    } else {
+      validateAll();
+    }
+  });
 
 })();
 </script>
