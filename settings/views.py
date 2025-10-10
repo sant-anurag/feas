@@ -811,3 +811,301 @@ def get_monthly_max(request):
     ed_s = ed.strftime("%Y-%m-%d") if ed else ""
 
     return JsonResponse({"ok": True, "max_hours": max_hours, "start_date": sd_s, "end_date": ed_s})
+
+# Add these imports at the top of your views.py if not already present
+import json
+import datetime
+import pandas as pd
+
+from django.shortcuts import render, redirect, reverse
+from django.contrib import messages
+from django.views.decorators.http import require_http_methods
+from django.db import connection, transaction
+
+# --- Optional fallback if you don't have the helper; remove if you do ---
+def _ensure_import_history_table(cur):
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS import_history (
+              id BIGINT AUTO_INCREMENT PRIMARY KEY,
+              imported_by VARCHAR(255),
+              filename VARCHAR(512),
+              started_at DATETIME,
+              finished_at DATETIME,
+              total_rows INT,
+              master_inserted INT DEFAULT 0,
+              master_failed INT DEFAULT 0,
+              projects_created INT DEFAULT 0,
+              wbs_inserted INT DEFAULT 0,
+              wbs_failed INT DEFAULT 0,
+              errors TEXT,
+              meta_map TEXT,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """)
+    except Exception:
+        # best-effort; ignore failures
+        pass
+# ---------------------------------------------------------------------
+
+@require_http_methods(["GET", "POST"])
+def import_fce_projects(request):
+    """
+    Import unique Project names from the FCE file (sheet index 1, header row 1).
+    Creates/upserts rows into `subprojects` table and optionally creates parent `projects`.
+    """
+    if request.method == "GET":
+        return render(request, "settings/import_fce.html", {"preview_rows": None})
+
+    # reset behavior
+    if "reset" in request.POST:
+        messages.info(request, "FCE import reset.")
+        return redirect(reverse("settings:import_fce_projects"))
+
+    uploaded_file = request.FILES.get("file")
+    if not uploaded_file:
+        messages.error(request, "No file uploaded.")
+        return redirect(reverse("settings:import_fce_projects"))
+
+    create_projects = bool(request.POST.get("create_projects", None))
+    update_existing = bool(request.POST.get("update_existing", None))
+
+    started_at = datetime.datetime.now()
+    importer = getattr(request.user, "username", None) or "anonymous"
+    filename = getattr(uploaded_file, "name", "fce_uploaded.xlsx")
+
+    # --- Read the second sheet with header on row index 1 (second row) ---
+    try:
+        xls = pd.ExcelFile(uploaded_file)
+    except Exception as e:
+        messages.error(request, f"Failed to open Excel: {e}")
+        return redirect(reverse("settings:import_fce_projects"))
+
+    # Validate at least 2 sheets exist; else fallback to first sheet
+    sheet_index_to_read = 1 if len(xls.sheet_names) > 1 else 0
+    chosen_sheet = xls.sheet_names[sheet_index_to_read]
+
+    try:
+        # header=1 -> use the second row as header (0-based)
+        df = pd.read_excel(xls, sheet_name=chosen_sheet, header=1, dtype=object)
+    except Exception as e:
+        messages.error(request, f"Failed to read sheet '{chosen_sheet}': {e}")
+        return redirect(reverse("settings:import_fce_projects"))
+
+    if df.shape[0] == 0:
+        messages.error(request, "The selected sheet is empty.")
+        return redirect(reverse("settings:import_fce_projects"))
+
+    # Detect likely project-name column and mdm/bg code column
+    orig_headers = list(df.columns)
+    headers_norm = [ (str(h).strip().lower() if h is not None else "") for h in orig_headers ]
+
+    def find_column_by_candidates(candidates):
+        for cand in candidates:
+            cand_l = cand.lower()
+            for i, h in enumerate(headers_norm):
+                if cand_l in h:
+                    return orig_headers[i]
+        return None
+
+    proj_candidates = [
+        "project name", "project", "project name/description", "project name from", "project name in promise", "name in promise", "project name/description from region"
+    ]
+    code_candidates = [
+        "mdm code", "mdm", "bg code", "bg", "bg_code", "mdm_code", "mdm/bgc", "mdm/bg"
+    ]
+
+    proj_col = find_column_by_candidates(proj_candidates)
+    code_col = find_column_by_candidates(code_candidates)
+
+    # Fallback heuristics if not found
+    if proj_col is None:
+        # pick the first header containing 'name' or 'project'
+        for i, h in enumerate(headers_norm):
+            if "project" in h or "name" in h:
+                proj_col = orig_headers[i]
+                break
+    if code_col is None:
+        for i, h in enumerate(headers_norm):
+            if "mdm" in h or "bg" in h:
+                code_col = orig_headers[i]
+                break
+
+    # Final fallback: use first two columns
+    if proj_col is None and len(orig_headers) >= 1:
+        proj_col = orig_headers[0]
+    if code_col is None and len(orig_headers) >= 2:
+        code_col = orig_headers[1]
+
+    # Prepare working df: trim strings, drop completely empty project names
+    working = df.copy()
+    # convert to string safely and strip
+    def safe_str(v):
+        if v is None:
+            return ""
+        # pandas NaN -> float, treat as empty
+        try:
+            if isinstance(v, float) and pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        return str(v).strip()
+
+    working["__project_name"] = working[proj_col].apply(safe_str) if proj_col else ""
+    working["__mdm_code"] = working[code_col].apply(safe_str) if code_col else ""
+
+    # filter out empty project names
+    working = working[working["__project_name"].str.len() > 0].reset_index(drop=True)
+
+    # dedupe unique project names + mdm_code pairs
+    unique_pairs = working[["__project_name", "__mdm_code"]].drop_duplicates().reset_index(drop=True)
+    unique_pairs = unique_pairs.rename(columns={"__project_name": "project_name", "__mdm_code": "mdm_code"})
+
+    # Ensure subprojects table exists (DDL from your spec)
+    try:
+        with connection.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS `subprojects` (
+                  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                  `project_id` BIGINT NOT NULL,
+                  `name` VARCHAR(512) NOT NULL,
+                  `mdm_code` VARCHAR(128) DEFAULT NULL,
+                  `bg_code` VARCHAR(128) DEFAULT NULL,
+                  `mdm_code_norm` VARCHAR(128) GENERATED ALWAYS AS (UPPER(TRIM(COALESCE(`mdm_code`,'')))) STORED,
+                  `bg_code_norm`  VARCHAR(128) GENERATED ALWAYS AS (UPPER(TRIM(COALESCE(`bg_code`,'')))) STORED,
+                  `priority` INT DEFAULT 0,
+                  `description` TEXT,
+                  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY `uq_subproject_project_name` (`project_id`, `name`),
+                  KEY `idx_subprojects_mdm_code_norm` (`mdm_code_norm`),
+                  KEY `idx_subprojects_bg_code_norm` (`bg_code_norm`),
+                  CONSTRAINT `fk_subproj_project` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+    except Exception as e:
+        messages.error(request, f"Failed to ensure subprojects table: {e}")
+        return redirect(reverse("settings:import_fce_projects"))
+
+    projects_created = 0
+    subprojects_created = 0
+    subprojects_updated = 0
+    errors = []
+
+    # Cache existing projects
+    with connection.cursor() as cur:
+        cur.execute("SELECT id, name FROM projects")
+        existing_projects = { (row[1] or "").strip(): row[0] for row in cur.fetchall() }
+
+    # Use transaction.atomic to group the import operations (each row still uses DB cursor)
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                for idx, row in unique_pairs.iterrows():
+                    project_name = (row["project_name"] or "").strip()
+                    mdm_code_raw = (row["mdm_code"] or "").strip()
+                    mdm_code = mdm_code_raw if mdm_code_raw != "" else None
+
+                    # find or create parent project
+                    project_id = existing_projects.get(project_name)
+                    if project_id is None and create_projects:
+                        try:
+                            cur.execute("INSERT INTO projects (name) VALUES (%s)", [project_name])
+                            project_id = cur.lastrowid
+                            existing_projects[project_name] = project_id
+                            projects_created += 1
+                        except Exception:
+                            # race-safe fetch fallback
+                            cur.execute("SELECT id FROM projects WHERE name=%s LIMIT 1", [project_name])
+                            rr = cur.fetchone()
+                            if rr:
+                                project_id = rr[0]
+                                existing_projects[project_name] = project_id
+
+                    # If still no project_id, skip this row (user can enable create_projects or fix data)
+                    if project_id is None:
+                        errors.append(f"Row {idx+1}: missing parent project '{project_name}' (skipped)")
+                        continue
+
+                    # Upsert into subprojects by (project_id, name)
+                    try:
+                        cur.execute("SELECT id FROM subprojects WHERE project_id=%s AND name=%s LIMIT 1", [project_id, project_name])
+                        ex = cur.fetchone()
+                        if ex:
+                            sub_id = ex[0]
+                            if update_existing:
+                                cur.execute("""
+                                    UPDATE subprojects
+                                       SET mdm_code=%s, bg_code=%s, updated_at=CURRENT_TIMESTAMP
+                                     WHERE id=%s
+                                """, [mdm_code, mdm_code, sub_id])
+                                subprojects_updated += 1
+                        else:
+                            cur.execute("""
+                                INSERT INTO subprojects (project_id, name, mdm_code, bg_code)
+                                VALUES (%s, %s, %s, %s)
+                            """, [project_id, project_name, mdm_code, mdm_code])
+                            subprojects_created += 1
+                    except Exception as ex_up:
+                        errors.append(f"Row {idx+1} failed: {ex_up}")
+
+    except Exception as ex_all:
+        messages.error(request, f"Transaction failed during import: {ex_all}")
+        return redirect(reverse("settings:import_fce_projects"))
+
+    finished_at = datetime.datetime.now()
+
+    # Write import_history (best-effort)
+    try:
+        with connection.cursor() as cur:
+            _ensure_import_history_table(cur)
+            cur.execute("""
+                INSERT INTO import_history
+                (imported_by, filename, started_at, finished_at, total_rows,
+                 master_inserted, master_failed, projects_created, wbs_inserted, wbs_failed, errors, meta_map)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, [
+                importer,
+                filename,
+                started_at.strftime("%Y-%m-%d %H:%M:%S"),
+                finished_at.strftime("%Y-%m-%d %H:%M:%S"),
+                int(len(unique_pairs)),
+                0, 0,
+                projects_created,
+                subprojects_created,
+                subprojects_updated,
+                json.dumps(errors[:2000]),
+                json.dumps({
+                    "sheet": chosen_sheet,
+                    "header_row": 1,
+                    "detected_project_column": proj_col,
+                    "detected_code_column": code_col,
+                    "orig_headers": orig_headers
+                })
+            ])
+    except Exception:
+        # non-fatal
+        pass
+
+    # Feedback to user
+    messages.success(request, f"Subprojects created: {subprojects_created}, updated: {subprojects_updated}.")
+    if projects_created:
+        messages.info(request, f"Parent projects auto-created: {projects_created}.")
+    if errors:
+        messages.warning(request, f"{len(errors)} rows had issues; check import_history for details.")
+
+    # Build a small preview for the template (first 10 unique pairs)
+    preview_headers = ["project_name", "mdm_code"]
+    preview_rows = []
+    for _, r in unique_pairs.head(10).iterrows():
+        preview_rows.append([r["project_name"], r["mdm_code"]])
+
+    context = {
+        "preview_headers": preview_headers,
+        "preview_rows": preview_rows,
+        "chosen_sheet": chosen_sheet,
+        "chosen_header_row": 1
+    }
+    return render(request, "settings/import_fce.html", context)
+
+

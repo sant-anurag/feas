@@ -155,9 +155,16 @@ MENU_TREE = [
         "submenus": [
             {
                 "key": "import_master",
-                "title": "Import Master",
+                "title": "Import IOM Master",
                 "icon": "upload",
                 "url": reverse_lazy("settings:import_master"),
+                "roles": ["ADMIN", "PDL"],
+            },
+            {
+                "key": "import_fce_projects_master",
+                "title": "Import FCE Projects",
+                "icon": "upload",
+                "url": reverse_lazy("settings:import_fce_projects"),
                 "roles": ["ADMIN", "PDL"],
             },
             {

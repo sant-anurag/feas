@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Import FCE Projects — Settings{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'projects/css/projects.css' %}">
+<link rel="stylesheet" href="{% static 'projects/css/projects-actions.css' %}">
+<style>
+  /* polished import UI for FCE projects */
+  .import-panel { max-width: 1100px; margin: 20px auto; padding: 20px; background: #ffffff; border-radius: 12px; box-shadow: 0 8px 30px rgba(16,24,40,0.06); }
+  .import-grid { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
+  .form-input { display: block; width: 100%; padding: 12px 14px; border: 1px solid #e6eef5; border-radius: 10px; background: #fbfdff; font-size:14px; }
+  .btn { padding: 10px 14px; border-radius: 10px; cursor: pointer; border: none; font-weight:600; }
+  .btn.primary { background: linear-gradient(180deg,#0f63ff,#0b4fe5); color: #fff; box-shadow: 0 8px 22px rgba(15,99,255,0.10); }
+  .btn.ghost { background: transparent; color: #0b2b4a; border: 1px solid #e6eef5; }
+  .small-muted { font-size: 13px; color: #475569; }
+  .actions-panel { padding: 14px; border-radius: 10px; background: #fbfdff; border: 1px solid #eef6ff; }
+  .preview-table { width:100%; border-collapse: collapse; font-size:13px; }
+  .preview-table th { background:#fbfcfe; padding:10px; text-align:left; border-bottom:1px solid #eef2f7; position:sticky; top:0; z-index:2; }
+  .preview-table td { padding:8px 10px; border-bottom:1px solid #f2f6fb; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px; }
+  .msg-success { background:#eef9f0; color:#0b6b2f; padding:10px; border-radius:8px; border:1px solid #d2f3d6; }
+  .msg-error { background:#fff1f0; color:#8a1f11; padding:10px; border-radius:8px; border:1px solid #ffd8d4; }
+  .form-row { margin-top:10px; display:flex; gap:10px; align-items:center; }
+  label.checkbox { display:flex; gap:8px; align-items:center; cursor:pointer; font-size:14px; }
+  .meta { font-size:13px; color:#475569; margin-top:10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="import-panel">
+  <h2 style="margin:0 0 12px 0;">Settings — Import FCE Projects</h2>
+
+  {% if messages %}
+    <div style="margin-bottom:14px;">
+      {% for m in messages %}
+        {% if 'error' in m.tags %}
+          <div class="msg-error">{{ m }}</div>
+        {% elif 'warning' in m.tags %}
+          <div class="msg-warning">{{ m }}</div>
+        {% else %}
+          <div class="msg-success">{{ m }}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="import-grid">
+    <div>
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label style="display:block;font-weight:700;margin-bottom:8px;">Select FCE Excel file (first sheet will be used)</label>
+        <input type="file" name="file" accept=".xlsx,.xls" class="form-input" required />
+
+        <div class="form-row">
+          <label class="checkbox">
+            <input type="checkbox" name="create_projects" checked />
+            <span>Create parent Projects when missing</span>
+          </label>
+          <label class="checkbox" title="If checked, existing subproject rows will be updated with codes/description">
+            <input type="checkbox" name="update_existing" checked />
+            <span>Update existing subprojects</span>
+          </label>
+        </div>
+
+        <div style="margin-top:14px; display:flex; gap:10px;">
+          <button type="submit" name="import" class="btn primary">Import Projects</button>
+          <button type="submit" name="reset" class="btn ghost">Reset</button>
+        </div>
+
+        <p class="small-muted" style="margin-top:12px;">
+          The sheet should contain: <strong>Project Name</strong> (parent), <strong>Sub Project</strong> (child), and <strong>MDM / BG Code</strong>.
+          MDM and BG are treated identically — the same value is stored in both columns. First sheet of the workbook will be used.
+        </p>
+
+        <div class="meta">
+          Imported subprojects will be upserted by <code>(project_id, name)</code>. The provided DDL uses normalized stored columns
+          (<code>mdm_code_norm</code>, <code>bg_code_norm</code>) so lookups are case-insensitive.
+        </div>
+      </form>
+    </div>
+
+    <aside>
+      <div class="actions-panel">
+        <h3 style="margin-top:0;margin-bottom:8px;">Quick tips</h3>
+        <ul style="margin:0 0 0 18px; color:#334155;">
+          <li>Ensure the sheet has a header row (row 1) with clear columns like <em>Project Name</em>, <em>Sub Project</em>, <em>MDM Code</em>.</li>
+          <li>If sheet uses a single "Project Name" for both project & subproject, the subproject name will be the same as project (you can adjust after import).</li>
+          <li>If your sheet contains priority values, include a column named <em>Priority</em> to influence reporting preference later.</li>
+        </ul>
+
+        <div style="margin-top:12px;">
+          <h4 style="margin:0 0 8px 0;">After import</h4>
+          <p class="small-muted" style="margin:0;">
+            Use the admin pages or SQL to review <code>subprojects</code>. The importer writes an entry into <code>import_history</code>.
+          </p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  {% if preview_rows %}
+    <div style="margin-top:22px;">
+      <h3 style="margin:8px 0 12px 0;">Preview (first {{ preview_rows|length }} rows)</h3>
+      <div style="overflow:auto;border:1px solid #e2e8f0;border-radius:8px; max-height:420px;">
+        <table class="preview-table" style="min-width:900px;">
+          <thead>
+            <tr>
+              {% for h in preview_headers %}
+                <th style="font-weight:600;">{{ h }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in preview_rows %}
+              <tr>
+                {% for cell in row %}
+                  <td>{{ cell }}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

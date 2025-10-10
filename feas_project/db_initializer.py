@@ -319,6 +319,27 @@ class DatabaseInitializer:
                 FOREIGN KEY (`pm_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
+        # NEW: subprojects table (one-to-many from projects)
+        print("Adding DDL for table: subprojects")
+        ddls.append("""
+       CREATE TABLE IF NOT EXISTS `subprojects` (
+              `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+              `project_id` BIGINT NOT NULL,
+              `name` VARCHAR(512) NOT NULL,
+              `mdm_code` VARCHAR(128) DEFAULT NULL,
+              `bg_code` VARCHAR(128) DEFAULT NULL,
+              `mdm_code_norm` VARCHAR(128) GENERATED ALWAYS AS (UPPER(TRIM(COALESCE(`mdm_code`,'')))) STORED,
+              `bg_code_norm`  VARCHAR(128) GENERATED ALWAYS AS (UPPER(TRIM(COALESCE(`bg_code`,'')))) STORED,
+              `priority` INT DEFAULT 0, -- optional: higher -> prefer when resolving single match
+              `description` TEXT,
+              `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              UNIQUE KEY `uq_subproject_project_name` (`project_id`, `name`),
+              KEY `idx_subprojects_mdm_code_norm` (`mdm_code_norm`),
+              KEY `idx_subprojects_bg_code_norm` (`bg_code_norm`),
+              CONSTRAINT `fk_subproj_project` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """)
 
         print("Adding DDL for table: monthly_hours_limit")
         ddls.append("""
