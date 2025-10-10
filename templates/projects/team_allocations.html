@@ -20,6 +20,11 @@
 .btn-save { background:linear-gradient(90deg,#2563eb,#1e40af); color:#fff; border:none; }
 .btn-reset { background:#fff; border:1px solid rgba(10,30,80,0.08); color:#0b1320; }
 
+/* Add/Remove row buttons styling */
+.btn-add-resource { background:#0b5ed7; color:#fff; padding:8px 12px; border-radius:8px; border:none; font-weight:700; }
+.btn-remove-row { background:#ef4444; color:#fff; padding:6px 10px; border-radius:6px; border:none; font-weight:700; }
+
+/* small helper */
 .controls { display:flex; gap:12px; align-items:center; margin-bottom:12px; }
 .control-item { display:flex; gap:8px; align-items:center; }
 
@@ -62,7 +67,11 @@
             </div>
             <div class="small-muted">Reportee</div>
           </div>
-          <div class="small-muted">Tip: enter weekly % values (0-100). Save per-row.</div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            {# NEW: Add Resource button visible to Team Lead so they can add reportees under their allocation #}
+            <button type="button" class="btn-add-resource" aria-label="Add reportee row">➕ Add Resource</button>
+            <div class="small-muted">Tip: enter weekly % values (0-100). Save per-row.</div>
+          </div>
         </div>
 
         <table class="team-table">
@@ -153,47 +162,149 @@
 <script>
 function getCookie(name){ const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return v?v.pop():''; }
 
-document.querySelectorAll('.btn-save').forEach(btn=>{
-  btn.addEventListener('click', function(e){
-    const tr = this.closest('tr');
-    const allocation_id = tr.dataset.allocation;
-    const weekly = {};
-    tr.querySelectorAll('.week-input').forEach(inp=>{
-      // use numeric strings / numbers; send as-is
-      weekly[inp.dataset.week] = Number(inp.value || 0);
-    });
+// URLs used by this template
+const SAVE_TEAM_ALLOCATION_URL = "{% url 'projects:save_team_allocation' %}";
+const CREATE_MONTHLY_ENTRY_URL = "{% url 'projects:create_monthly_allocation_entry' %}"; // optional: backend endpoint to create new monthly allocation (if implemented)
 
-    // validate total percentage per allocation row
-    let totalPct = 0;
-    Object.values(weekly).forEach(v=> totalPct += Number(v));
-    if(totalPct > 100){
-      if(!confirm("Total % > 100. Continue anyway?")) return;
-    }
+document.addEventListener('DOMContentLoaded', () => {
+  // hook existing rows' actions
+  document.querySelectorAll('.btn-save').forEach(hookSave);
+  document.querySelectorAll('.btn-reset').forEach(btn => btn.addEventListener('click', () => location.reload()));
 
-    fetch("{% url 'projects:save_team_allocation' %}", {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken')
-      },
-      body: JSON.stringify({allocation_id: Number(allocation_id), weekly: weekly})
-    }).then(r=>r.json()).then(data=>{
-      if(data.ok) {
-        alert("Saved successfully!");
-        // optionally reload weekly data for this row — for now reload entire page to reflect server-calculated hours
-        location.reload();
-      } else alert("Error: " + (data.error || JSON.stringify(data)));
-    }).catch(err=>{
-      alert("Save failed: " + err);
+  // hook Add Resource buttons (one per resource-block)
+  document.querySelectorAll('.btn-add-resource').forEach(btn => {
+    btn.addEventListener('click', function(){
+      const block = this.closest('.resource-block');
+      const tbody = block.querySelector('tbody');
+      // append a new editable row (no allocation id yet)
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" class="form-control new-project" placeholder="Project / WBS"></td>
+        <td><input type="text" class="form-control new-domain" placeholder="Domain"></td>
+        <td><input class="form-control new-allocated-hrs" type="number" step="0.25" min="0" value="0"></td>
+        <td><input class="week-input" type="number" min="0" max="100" step="0.01" data-week="1" value="0"></td>
+        <td><input class="week-input" type="number" min="0" max="100" step="0.01" data-week="2" value="0"></td>
+        <td><input class="week-input" type="number" min="0" max="100" step="0.01" data-week="3" value="0"></td>
+        <td><input class="week-input" type="number" min="0" max="100" step="0.01" data-week="4" value="0"></td>
+        <td class="actions">
+          <button class="btn btn-save new-save" type="button">Save</button>
+          <button class="btn btn-remove-row" type="button">Remove</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+
+      // hook remove for this row
+      tr.querySelector('.btn-remove-row').addEventListener('click', () => tr.remove());
+
+      // hook save for this new row
+      tr.querySelector('.new-save').addEventListener('click', async () => {
+        // gather data
+        const projectName = tr.querySelector('.new-project').value || '';
+        const domain = tr.querySelector('.new-domain').value || '';
+        const allocatedHrs = Number(tr.querySelector('.new-allocated-hrs').value || 0);
+        const weekly = {};
+        tr.querySelectorAll('.week-input').forEach(w => weekly[w.dataset.week] = Number(w.value || 0));
+
+        // optional client-side validation: weekly % sum
+        let totalPct = 0;
+        Object.values(weekly).forEach(v => totalPct += Number(v));
+        if (totalPct > 100 && !confirm('Total % > 100. Continue saving?')) return;
+
+        // Create monthly allocation entry on server (if you have endpoint). If not present, this JS will attempt and fallback to alert.
+        try {
+          const csrftoken = getCookie('csrftoken');
+          const resp = await fetch(CREATE_MONTHLY_ENTRY_URL, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type':'application/json','X-CSRFToken': csrftoken},
+            body: JSON.stringify({
+              // minimal info; adjust on backend as required
+              project_name: projectName,
+              domain_name: domain,
+              allocated_hours: allocatedHrs,
+              weekly_percent: weekly,
+              // pass month or reportee id if needed; this template expects backend to infer from current page context or accept fields
+              month_start: "{{ month_start|date:'Y-m-d' }}",
+              user_ldap: "{{ request.user.username|default:'' }}"
+            })
+          });
+          const data = await resp.json();
+          if (data && data.ok && data.allocation_id) {
+            // replace the editable row with server-saved row (server should return saved fields)
+            tr.dataset.allocation = data.allocation_id;
+            // replace columns with server values (or keep submitted)
+            tr.innerHTML = `
+              <td>${projectName}</td>
+              <td>${domain}</td>
+              <td>${allocatedHrs.toFixed(2)}</td>
+              <td><input class="week-input" type="number" min="0" max="100" step="0.01" data-week="1" value="${weekly[1]||0}"></td>
+              <td><input class="week-input" type="number" min="0" max="100" step="0.01" data-week="2" value="${weekly[2]||0}"></td>
+              <td><input class="week-input" type="number" min="0" max="100" step="0.01" data-week="3" value="${weekly[3]||0}"></td>
+              <td><input class="week-input" type="number" min="0" max="100" step="0.01" data-week="4" value="${weekly[4]||0}"></td>
+              <td class="actions">
+                <button class="btn btn-save" type="button">Save</button>
+                <button class="btn btn-reset" type="button">Reset</button>
+              </td>
+            `;
+            // hook newly created row save/reset
+            const newSave = tr.querySelector('.btn-save');
+            const newReset = tr.querySelector('.btn-reset');
+            hookSave(newSave);
+            if (newReset) newReset.addEventListener('click', () => location.reload());
+            alert('Created allocation row successfully.');
+          } else {
+            alert('Create failed: ' + (data && data.error ? data.error : 'server did not return id'));
+            console.warn('create_monthly_allocation_entry response', data);
+          }
+        } catch (err) {
+          console.error('create_monthly_allocation_entry', err);
+          alert('Create failed (see console). If you do not have CREATE endpoint, implement projects:create_monthly_allocation_entry or save rows from Monthly Allocations and reload this page.');
+        }
+      });
     });
   });
-});
 
-document.querySelectorAll('.btn-reset').forEach(btn=>{
-  btn.addEventListener('click', function(e){
-    location.reload();
-  });
-});
+  // existing Save handler for rows that already have allocation_id
+  function hookSave(btn){
+    btn.addEventListener('click', function(e){
+      const tr = this.closest('tr');
+      const allocation_id = tr.dataset.allocation;
+      if (!allocation_id) {
+        alert('This row was not created on server yet; please use Add Resource -> Save to create it.');
+        return;
+      }
+      const weekly = {};
+      tr.querySelectorAll('.week-input').forEach(inp=>{
+        weekly[inp.dataset.week] = Number(inp.value || 0);
+      });
+
+      // validate total percentage per allocation row
+      let totalPct = 0;
+      Object.values(weekly).forEach(v=> totalPct += Number(v));
+      if(totalPct > 100 && !confirm("Total % > 100. Continue anyway?")) return;
+
+      fetch(SAVE_TEAM_ALLOCATION_URL, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({allocation_id: Number(allocation_id), weekly: weekly})
+      }).then(r=>r.json()).then(data=>{
+        if(data.ok) {
+          alert("Saved successfully!");
+          // reload to show server-calculated amounts / validations
+          location.reload();
+        } else alert("Error: " + (data.error || JSON.stringify(data)));
+      }).catch(err=>{
+        alert("Save failed: " + err);
+      });
+    });
+  }
+
+  // Hook all currently existing save buttons (already done earlier)
+  // (hookSave was called during DOMContentLoaded for each existing .btn-save)
+
 </script>
 {% endblock %}

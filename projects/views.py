@@ -1508,6 +1508,108 @@ def api_projects(request):
         p['mapped_coe_count'] = counts.get(p['id'], 0)
     return JsonResponse({"projects": projects})
 
+# in views.py (or utils used by monthly_allocations view)
+from django.db import connection
+
+def get_user_projects_with_bgcode(request):
+    """
+    Returns a list of dicts: [{id, name, bg_code}, ...]
+    Logic: find prism_wbs rows where creator == logged in user and return distinct projects
+    If a project has multiple prism_wbs rows, pick the first non-empty bg_code (GROUP BY).
+    """
+    username = getattr(request.user, "username", "") or request.session.get('username') or ''
+    if not username:
+        return []
+
+    sql = """
+    SELECT p.id AS id,
+           p.name AS name,
+           COALESCE(
+              (SELECT pw.bg_code FROM prism_wbs pw
+                 WHERE pw.project_id = p.id AND pw.creator = %s
+                 AND COALESCE(pw.bg_code,'') <> ''
+                 LIMIT 1),
+              '' ) AS bg_code
+    FROM projects p
+    INNER JOIN prism_wbs pw_by_creator ON pw_by_creator.project_id = p.id AND pw_by_creator.creator = %s
+    GROUP BY p.id, p.name
+    ORDER BY p.name
+    """
+    params = [username, username]
+    out = []
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        cols = [c[0] for c in cur.description]
+        rows = cur.fetchall()
+        for row in rows:
+            rec = dict(zip(cols, row))
+            out.append({
+                "id": rec.get("id"),
+                "name": rec.get("name") or "",
+                "bg_code": (rec.get("bg_code") or "").strip()
+            })
+    return out
+
+@require_GET
+def api_subprojects(request):
+    """
+    Return subprojects for a given bg_code (preferred) or project_id (fallback).
+    Matching rule: subprojects.mdm_code = bg_code
+    If project_id provided but bg_code missing, derive bg_code from prism_wbs (creator-insensitive).
+    """
+    bg_code = (request.GET.get('bg_code') or '').strip()
+    project_id = (request.GET.get('project_id') or '').strip()
+
+    try:
+        # If bg_code not supplied, try to derive using prism_wbs for the project_id
+        if not bg_code and project_id:
+            try:
+                with connection.cursor() as cur:
+                    cur.execute("""
+                      SELECT NULLIF(pw.bg_code, '') AS code
+                      FROM prism_wbs pw
+                      WHERE pw.project_id = %s
+                        AND COALESCE(pw.bg_code, '') <> ''
+                      LIMIT 1
+                    """, [project_id])
+                    rows = dictfetchall(cur)
+                    if rows:
+                        bg_code = (rows[0].get('code') or '').strip()
+
+                    if rows:
+                        bg_code = (rows[0].get('code') or '').strip()
+            except Exception:
+                logger.exception("api_subprojects: error deriving bg_code from prism_wbs for project_id=%s", project_id)
+
+        # If still no bg_code -> return empty (safe)
+        if not bg_code:
+            return JsonResponse({"ok": True, "subprojects": []})
+
+        # Query subprojects where mdm_code = bg_code
+        with connection.cursor() as cur:
+            cur.execute("""
+              SELECT id, name, mdm_code, bg_code
+              FROM subprojects
+              WHERE mdm_code = %s
+              ORDER BY priority DESC, name
+            """, [bg_code])
+            rows = dictfetchall(cur)
+            print("api_subprojects: found %d subprojects for bg_code=%s", len(rows), bg_code)
+    except Exception as e:
+        logger.exception("api_subprojects: DB error for bg_code=%s project_id=%s", bg_code, project_id)
+        return JsonResponse({"ok": False, "error": "DB error"}, status=500)
+
+    subs = []
+    for r in rows:
+        subs.append({
+            "id": r.get("id"),
+            "name": r.get("name") or "",
+            "mdm_code": r.get("mdm_code"),
+            "bg_code": r.get("bg_code")
+        })
+    return JsonResponse({"ok": True, "subprojects": subs})
+
+
 # --- get_allocations_for_iom (returns saved rows for requested iom_id + month_start) ---
 @require_GET
 def get_allocations_for_iom(request):

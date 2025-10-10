@@ -30,6 +30,7 @@ urlpatterns = [
     path("map-coes/", views.map_coes, name="map_coes"),
     path("api/coes/", views.api_coes, name="api_coes"),
     path("api/projects/", views.api_projects, name="api_projects"),
+    path("api/subprojects/", views.api_subprojects, name="api_subprojects"),
     path("team-allocations/", views.team_allocations, name="team_allocations"),
     path("team-allocations/save/", views.save_team_allocation, name="save_team_allocation"),
 

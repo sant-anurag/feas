@@ -68,14 +68,24 @@
   <div class="filters" role="region" aria-label="Filters">
     <div class="control">
       <label for="projectSelect">Project</label>
-      <select id="projectSelect" class="form-select">
-        {% if projects %}
-          {% for p in projects %}
-            <option value="{{ p.id }}">{{ p.name }}</option>
-          {% endfor %}
-        {% else %}
+
+        {# monthly_allocations.html: ensure project option contains bg code attribute #}
+        <select id="projectSelect" class="form-select">
+          {% if projects %}
+            {% for p in projects %}
+              <option value="{{ p.id }}" data-bg="{{ p.bg_code|default:''|escape }}">{{ p.name }}</option>
+            {% endfor %}
+          {% else %}
             <option value="">-- No projects assigned --</option>
-        {% endif %}
+          {% endif %}
+        </select>
+    </div>
+
+    <!-- NEW: Subproject dropdown (populated when Load IOMs or project changes) -->
+    <div class="control">
+      <label for="subprojectSelect">Subproject</label>
+      <select id="subprojectSelect" class="form-select">
+        <option value="">-- Select Subproject (optional) --</option>
       </select>
     </div>
 
@@ -137,9 +147,9 @@
       </div>
 
       <div class="iom-right">
-        <div class="stat">Month FTE: <strong id="iomMonthFte">0.0000</strong></div>
+        <div class="stat">Month FTE: <strong id="iomMonthFte">0.00</strong></div>
         <div class="stat">Month Hrs: <strong id="iomMonthHrs">0.00</strong></div>
-        <div class="stat">Remaining FTE: <strong id="iomRemFte">0.0000</strong></div>
+        <div class="stat">Remaining FTE: <strong id="iomRemFte">0.00</strong></div>
         <div class="stat">Remaining Hrs: <strong id="iomRemHrs">0.00</strong></div>
       </div>
     </div>
@@ -156,7 +166,8 @@
       <table id="allocTable" class="table" aria-describedby="AllocationsForIom">
         <thead>
           <tr>
-            <th>Resource (LDAP)<div style="font-size:0.8rem;color:#94a3b8;">type 3+ chars to search</div></th>
+            <!-- CHANGED: header to "Lead Name / Resource" while keeping LDAP hint -->
+            <th>Lead Name / Resource<div style="font-size:0.8rem;color:#94a3b8;">type 3+ chars to search</div></th>
             <th style="width:130px">Total Hours</th>
             <th style="width:120px">Actions</th>
           </tr>
@@ -193,6 +204,7 @@
 
   // DOM refs
   const projectSelect = document.getElementById('projectSelect');
+  const subprojectSelect = document.getElementById('subprojectSelect'); // NEW
   const yearInput = document.getElementById('yearInput');
   const monthSelect = document.getElementById('monthSelect');
   const loadIomsBtn = document.getElementById('loadIomsBtn');
@@ -219,13 +231,15 @@
   const saveTooltip = document.getElementById('saveTooltip');
   const exportBtn = document.getElementById('exportBtn');
 
-  // URLs
+  // URLs (keep names consistent with your project urls / views)
   const LDAP_ENDPOINT = '{% url "projects:allocations_ldap_search" %}';
   const GET_IOMS_URL = '{% url "projects:get_applicable_ioms" %}';
   const GET_IOM_DETAILS_URL = '{% url "projects:get_iom_details" %}';
   const GET_SAVED_ALLOC_URL = '{% url "projects:get_allocations_for_iom" %}';
   const SAVE_ALLOC_URL = '{% url "projects:save_monthly_allocations" %}';
   const EXPORT_URL = '{% url "projects:export_allocations" %}';
+  // NEW: subprojects API (expects ?project_id=)
+  const GET_SUBPROJECTS_URL = '{% url "projects:api_subprojects" %}';
 
   // current month limit (per resource limit from DB)
   let CURRENT_MONTH_LIMIT = DEFAULT_MONTHLY_LIMIT;
@@ -238,11 +252,13 @@
     const year = yearInput.value || (new Date()).getFullYear();
     const month = monthSelect.value;
     const search = searchIom.value.trim();
+    const subproject_id = subprojectSelect.value || '';
 
     if (!project_id) { alert('Please select a project'); return; }
 
     const params = new URLSearchParams({ project_id, year, month });
     if (search) params.set('search', search);
+    if (subproject_id) params.set('subproject_id', subproject_id);
 
     try {
       const res = await fetch(GET_IOMS_URL + '?' + params.toString(), { credentials: 'same-origin' });
@@ -257,9 +273,10 @@
         const opt = document.createElement('option');
         opt.value = JSON.stringify(iom);  // store row
         opt.text = `${iom.iom_id} · Dept:${iom.department || '-'} · Hrs:${(parseFloat(iom.month_hours||0)).toFixed(2)}`;
-        // embed month_limit as data attribute (still keep JSON)
         iomsDropdown.appendChild(opt);
       });
+      // Also load subprojects for the selected project (keeps dropdown in sync)
+      await loadSubprojects(project_id);
     } catch (err) {
       console.error('loadIoms', err);
       alert('Failed to load IOMs (console).');
@@ -267,6 +284,59 @@
   }
 
   loadIomsBtn.addEventListener('click', loadIoms);
+
+  // Updated loadSubprojects to match project.bg_code -> subprojects.mdm_code
+async function loadSubprojects(project_id) {
+  if (!project_id) return;
+  try {
+    // Try to read bg_code from the selected option attribute (preferred)
+    const projSel = document.getElementById('projectSelect');
+    const selectedOpt = projSel ? projSel.selectedOptions[0] : null;
+    const bg_code = selectedOpt ? (selectedOpt.dataset.bg || '').trim() : '';
+
+    // Prepare URL and prefer bg_code param
+    const url = new URL(GET_SUBPROJECTS_URL, window.location.origin);
+    if (bg_code) {
+      url.searchParams.set('bg_code', bg_code);
+    } else {
+      // fallback for older API expecting project_id
+      url.searchParams.set('project_id', project_id);
+    }
+
+    const res = await fetch(url.toString(), { credentials: 'same-origin' });
+    if (!res.ok) {
+      console.warn('loadSubprojects: non-OK response', res.status);
+      return;
+    }
+    const data = await res.json();
+    const sel = document.getElementById('subprojectSelect');
+    sel.innerHTML = '<option value="">-- Select Subproject (optional) --</option>';
+    if (data && data.subprojects && data.subprojects.length) {
+      data.subprojects.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        // show name and mdm_code/bg code for clarity
+        opt.text = s.name + (s.mdm_code ? ` · ${s.mdm_code}` : '');
+        sel.appendChild(opt);
+      });
+    } else {
+      // no matching subprojects
+      const none = document.createElement('option');
+      none.value = '';
+      none.text = '-- No subprojects found --';
+      sel.appendChild(none);
+    }
+  } catch (err) {
+    console.warn('loadSubprojects error', err);
+  }
+}
+
+
+  // when project changes, update subproject dropdown automatically
+  projectSelect.addEventListener('change', () => {
+    const pid = projectSelect.value;
+    if (pid) loadSubprojects(pid);
+  });
 
   // when user selects an IOM from dropdown, fetch authoritative IOM details from server
   iomsDropdown.addEventListener('change', async function() {
@@ -295,11 +365,9 @@
     iomMonthFte.textContent = (parseFloat(iom.month_fte||0)).toFixed(2);
     iomMonthHrs.textContent = (parseFloat(iom.month_hours||0)).toFixed(2);
 
-
     // remaining values from server (we update both kv and badge)
     iomRemFte.textContent = (parseFloat(iom.remaining_fte||0)).toFixed(2);
     iomRemHrs.textContent = (parseFloat(iom.remaining_hours||0)).toFixed(2);
-
 
     // set current month limit (per-resource limit)
     CURRENT_MONTH_LIMIT = parseFloat(iom.month_limit || DEFAULT_MONTHLY_LIMIT);
@@ -519,6 +587,7 @@
     });
 
     const project_id = projectSelect.value;
+    const subproject_id = subprojectSelect.value || null; // include if selected
     const month_start = `${yearInput.value}-${String(monthSelect.value).padStart(2,'0')}-01`;
 
     try {
@@ -526,7 +595,7 @@
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRFTOKEN },
-        body: JSON.stringify({ project_id, month_start, items })
+        body: JSON.stringify({ project_id, subproject_id, month_start, items })
       });
       const data = await resp.json();
       if (!data.ok) {
